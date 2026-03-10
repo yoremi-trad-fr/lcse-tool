@@ -1,9 +1,9 @@
-# lcse-tool v2
+# lcse-tool 0.2 [EXPERIMENTAL-en cours de debug]
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
-Teste avec **One ~Kagayaku Kisetsu e~ Vista (2007)**.
+Teste avec **One Kagayaku Kisetsu e Vista (2007)**.
 
-## Changements v2
+## Changements v0.2
 
 - **`patch`** : remplace uniquement les fichiers modifies dans l'archive (garde PNG intacts)
 - **Shift-JIS natif** : les .txt sont directement en Shift-JIS (plus de conversion UTF-8)
