@@ -15,423 +15,235 @@ import (
 	"golang.org/x/text/transform"
 )
 
-const (
-	filenameSize = 0x40
-	lstEntrySize = filenameSize + 12
-)
+const (fnSz = 0x40; lstESz = fnSz + 12; instrSz = 12)
 
-var typeExtMap = map[uint32]string{1: "snx", 2: "bmp", 3: "png", 4: "wav", 5: "ogg"}
-var extTypeMap = map[string]uint32{"snx": 1, "bmp": 2, "png": 3, "wav": 4, "ogg": 5}
+var tEM = map[uint32]string{1:"snx",2:"bmp",3:"png",4:"wav",5:"ogg"}
+var eTM = map[string]uint32{"snx":1,"bmp":2,"png":3,"wav":4,"ogg":5}
 
-func sjisToUTF8(b []byte) (string, error) {
-	r := transform.NewReader(bytes.NewReader(b), japanese.ShiftJIS.NewDecoder())
-	out, err := io.ReadAll(r)
-	return string(out), err
-}
-func utf8ToSJIS(s string) ([]byte, error) {
-	r := transform.NewReader(strings.NewReader(s), japanese.ShiftJIS.NewEncoder())
-	return io.ReadAll(r)
-}
-func expandKey(b byte) uint32 {
-	k := uint32(b); return k | (k << 8) | (k << 16) | (k << 24)
-}
-func xorBytes(data []byte, key byte) []byte {
-	out := make([]byte, len(data))
-	for i, b := range data { out[i] = b ^ key }
-	return out
-}
-func autoDetectKey(lstPath string) (byte, error) {
-	f, err := os.Open(lstPath); if err != nil { return 0, err }
-	defer f.Close()
-	fi, _ := f.Stat()
-	var buf [4]byte; f.Read(buf[:])
-	key := buf[3]; if key == 0 { return 0, fmt.Errorf("cannot auto-detect key") }
-	count := binary.LittleEndian.Uint32(buf[:]) ^ expandKey(key)
-	if int(count)*lstEntrySize+4 == int(fi.Size()) { return key, nil }
-	return 0, fmt.Errorf("auto-detect failed")
-}
+func s2u(b []byte)(string,error){r:=transform.NewReader(bytes.NewReader(b),japanese.ShiftJIS.NewDecoder());o,e:=io.ReadAll(r);return string(o),e}
+func u2s(s string)([]byte,error){r:=transform.NewReader(strings.NewReader(s),japanese.ShiftJIS.NewEncoder());return io.ReadAll(r)}
+func exK(b byte)uint32{k:=uint32(b);return k|(k<<8)|(k<<16)|(k<<24)}
+func xB(d []byte,k byte)[]byte{o:=make([]byte,len(d));for i,b:=range d{o[i]=b^k};return o}
+func adK(p string)(byte,error){f,e:=os.Open(p);if e!=nil{return 0,e};defer f.Close();fi,_:=f.Stat();var b[4]byte;f.Read(b[:]);k:=b[3];if k==0{return 0,fmt.Errorf("no key")};if int(binary.LittleEndian.Uint32(b[:])^exK(k))*lstESz+4==int(fi.Size()){return k,nil};return 0,fmt.Errorf("fail")}
 
-// ─── LST ─────────────────────────────────────────────────────────────────────
+type LE struct{O,S uint32;N string;T uint32;E string}
+func pLST(p string,k byte)([]LE,error){d,e:=os.ReadFile(p);if e!=nil{return nil,e};xk:=exK(k);c:=binary.LittleEndian.Uint32(d[0:4])^xk;if int(c)*lstESz+4!=len(d){return nil,fmt.Errorf("mismatch")};es:=make([]LE,c);pos:=4;for i:=uint32(0);i<c;i++{o:=binary.LittleEndian.Uint32(d[pos:pos+4])^xk;s:=binary.LittleEndian.Uint32(d[pos+4:pos+8])^xk;pos+=8;nb:=make([]byte,fnSz);copy(nb,d[pos:pos+fnSz]);pos+=fnSz;nl:=0;for j:=0;j<fnSz;j++{if nb[j]==0{break};if nb[j]!=k{nb[j]^=k};nl=j+1};n,_:=s2u(nb[:nl]);t:=binary.LittleEndian.Uint32(d[pos:pos+4]);pos+=4;ext:=tEM[t];if ext==""{ext=fmt.Sprintf("%d",t)};es[i]=LE{o,s,n,t,ext}};return es,nil}
+func rK(p string,ko,so int)(byte,byte,error){var ik,sk byte;if ko>=0{ik=byte(ko)}else{d,e:=adK(p);if e!=nil{return 0,0,e};ik=d};if so>=0{sk=byte(so)}else{sk=ik+1};return ik,sk,nil}
 
-type LSTEntry struct {
-	Offset, Size uint32; Name string; TypeID uint32; Ext string
-}
-
-func parseLST(lstPath string, intKey byte) ([]LSTEntry, error) {
-	lstData, err := os.ReadFile(lstPath); if err != nil { return nil, err }
-	xorKey := expandKey(intKey)
-	count := binary.LittleEndian.Uint32(lstData[0:4]) ^ xorKey
-	if int(count)*lstEntrySize+4 != len(lstData) { return nil, fmt.Errorf("LST mismatch (key=0x%02x)", intKey) }
-	entries := make([]LSTEntry, count)
-	pos := 4
-	for i := uint32(0); i < count; i++ {
-		offset := binary.LittleEndian.Uint32(lstData[pos:pos+4]) ^ xorKey
-		size := binary.LittleEndian.Uint32(lstData[pos+4:pos+8]) ^ xorKey
-		pos += 8
-		nb := make([]byte, filenameSize); copy(nb, lstData[pos:pos+filenameSize]); pos += filenameSize
-		nl := 0
-		for j := 0; j < filenameSize; j++ {
-			if nb[j] == 0 { break }; if nb[j] != intKey { nb[j] ^= intKey }; nl = j + 1
-		}
-		name, _ := sjisToUTF8(nb[:nl]); if name == "" { name = string(nb[:nl]) }
-		typeID := binary.LittleEndian.Uint32(lstData[pos : pos+4]); pos += 4
-		ext := typeExtMap[typeID]; if ext == "" { ext = fmt.Sprintf("%d", typeID) }
-		entries[i] = LSTEntry{offset, size, name, typeID, ext}
-	}
-	return entries, nil
-}
-func resolveKey(lstPath string, ko, so int) (byte, byte, error) {
-	var ik, sk byte
-	if ko >= 0 { ik = byte(ko) } else {
-		d, e := autoDetectKey(lstPath); if e != nil { return 0, 0, e }; ik = d
-	}
-	if so >= 0 { sk = byte(so) } else { sk = ik + 1 }
-	fmt.Printf("[INFO] Key: 0x%02X, SNX key: 0x%02X\n", ik, sk); return ik, sk, nil
-}
-
-// ─── Archive commands ────────────────────────────────────────────────────────
-
-func cmdUnpack(pakPath, outDir string, ko, so int) error {
-	ik, sk, err := resolveKey(pakPath+".lst", ko, so); if err != nil { return err }
-	entries, err := parseLST(pakPath+".lst", ik); if err != nil { return err }
-	pf, err := os.Open(pakPath); if err != nil { return err }; defer pf.Close()
-	os.MkdirAll(outDir, 0755)
-	fmt.Printf("[INFO] Extracting %d files...\n", len(entries))
-	for _, e := range entries {
-		fn := e.Name + "." + e.Ext; data := make([]byte, e.Size)
-		pf.ReadAt(data, int64(e.Offset))
-		if e.Ext == "snx" { data = xorBytes(data, sk) }
-		os.WriteFile(filepath.Join(outDir, fn), data, 0644)
-	}
-	fmt.Printf("[INFO] Done! %d files -> %s\n", len(entries), outDir); return nil
-}
-
-func cmdPatch(origPak, patchDir, outPath string, ko, so int) error {
-	ik, sk, err := resolveKey(origPak+".lst", ko, so); if err != nil { return err }
-	entries, err := parseLST(origPak+".lst", ik); if err != nil { return err }
-	op, _ := os.Open(origPak); defer op.Close()
-	repl := map[string]string{}
-	filepath.Walk(patchDir, func(p string, i os.FileInfo, e error) error {
-		if e != nil || i.IsDir() { return e }; repl[strings.ToUpper(filepath.Base(p))] = p; return nil
-	})
-	of, _ := os.Create(outPath); defer of.Close()
-	lf, _ := os.Create(outPath + ".lst"); defer lf.Close()
-	xk := expandKey(ik); var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(len(entries))^xk); lf.Write(buf[:])
-	patched := 0
-	for _, e := range entries {
-		fn := e.Name + "." + e.Ext
-		var data []byte
-		if rp, ok := repl[strings.ToUpper(fn)]; ok {
-			data, _ = os.ReadFile(rp)
-			if e.Ext == "snx" { data = xorBytes(data, sk) }
-			fmt.Printf("[PATCH] %s\n", fn); patched++
-		} else {
-			data = make([]byte, e.Size); op.ReadAt(data, int64(e.Offset))
-		}
-		po, _ := of.Seek(0, io.SeekCurrent)
-		binary.LittleEndian.PutUint32(buf[:], uint32(po)^xk); lf.Write(buf[:])
-		binary.LittleEndian.PutUint32(buf[:], uint32(len(data))^xk); lf.Write(buf[:])
-		sn, _ := utf8ToSJIS(e.Name); if sn == nil { sn = []byte(e.Name) }
-		nb := make([]byte, filenameSize)
-		for i, b := range sn { if i < filenameSize { nb[i] = b ^ ik } }
-		lf.Write(nb)
-		binary.LittleEndian.PutUint32(buf[:], e.TypeID); lf.Write(buf[:])
-		of.Write(data)
-	}
-	fmt.Printf("[INFO] Patched %d/%d -> %s\n", patched, len(entries), outPath); return nil
-}
-
-func cmdPack(srcDir, outPath string, ko, so int) error {
-	ik := byte(0x01); sk := byte(0x02)
-	if ko >= 0 { ik = byte(ko); sk = ik + 1 }; if so >= 0 { sk = byte(so) }
-	var files []string
-	filepath.Walk(srcDir, func(p string, i os.FileInfo, e error) error {
-		if e != nil || i.IsDir() { return e }; files = append(files, p); return nil
-	}); sort.Strings(files)
-	pf, _ := os.Create(outPath); defer pf.Close()
-	lf, _ := os.Create(outPath + ".lst"); defer lf.Close()
-	xk := expandKey(ik); var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(len(files))^xk); lf.Write(buf[:])
-	for _, fp := range files {
-		data, _ := os.ReadFile(fp)
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fp), "."))
-		bn := strings.TrimSuffix(filepath.Base(fp), filepath.Ext(fp))
-		po, _ := pf.Seek(0, io.SeekCurrent)
-		binary.LittleEndian.PutUint32(buf[:], uint32(po)^xk); lf.Write(buf[:])
-		binary.LittleEndian.PutUint32(buf[:], uint32(len(data))^xk); lf.Write(buf[:])
-		sn, _ := utf8ToSJIS(bn); if sn == nil { sn = []byte(bn) }
-		nb := make([]byte, filenameSize)
-		for i, b := range sn { nb[i] = b ^ ik }; lf.Write(nb)
-		tid := extTypeMap[ext]
-		binary.LittleEndian.PutUint32(buf[:], tid); lf.Write(buf[:])
-		if ext == "snx" { data = xorBytes(data, sk) }; pf.Write(data)
-	}; return nil
-}
+func cmdUnpack(pp,od string,ko,so int)error{ik,sk,e:=rK(pp+".lst",ko,so);if e!=nil{return e};es,e:=pLST(pp+".lst",ik);if e!=nil{return e};pf,_:=os.Open(pp);defer pf.Close();os.MkdirAll(od,0755);for _,e:=range es{fn:=e.N+"."+e.E;d:=make([]byte,e.S);pf.ReadAt(d,int64(e.O));if e.E=="snx"{d=xB(d,sk)};os.WriteFile(filepath.Join(od,fn),d,0644)};fmt.Printf("[INFO] %d files -> %s\n",len(es),od);return nil}
+func cmdPatch(op,pd,out string,ko,so int)error{ik,sk,e:=rK(op+".lst",ko,so);if e!=nil{return e};es,e:=pLST(op+".lst",ik);if e!=nil{return e};pf,_:=os.Open(op);defer pf.Close();rp:=map[string]string{};filepath.Walk(pd,func(p string,i os.FileInfo,e error)error{if e!=nil||i.IsDir(){return e};rp[strings.ToUpper(filepath.Base(p))]=p;return nil});of,_:=os.Create(out);defer of.Close();lf,_:=os.Create(out+".lst");defer lf.Close();xk:=exK(ik);var b[4]byte;binary.LittleEndian.PutUint32(b[:],uint32(len(es))^xk);lf.Write(b[:]);pc:=0;for _,e:=range es{fn:=e.N+"."+e.E;var d[]byte;if r,ok:=rp[strings.ToUpper(fn)];ok{d,_=os.ReadFile(r);if e.E=="snx"{d=xB(d,sk)};fmt.Printf("[PATCH] %s\n",fn);pc++}else{d=make([]byte,e.S);pf.ReadAt(d,int64(e.O))};po,_:=of.Seek(0,io.SeekCurrent);binary.LittleEndian.PutUint32(b[:],uint32(po)^xk);lf.Write(b[:]);binary.LittleEndian.PutUint32(b[:],uint32(len(d))^xk);lf.Write(b[:]);sn,_:=u2s(e.N);if sn==nil{sn=[]byte(e.N)};nb:=make([]byte,fnSz);for i,v:=range sn{if i<fnSz{nb[i]=v^ik}};lf.Write(nb);binary.LittleEndian.PutUint32(b[:],e.T);lf.Write(b[:]);of.Write(d)};fmt.Printf("[INFO] %d/%d patched -> %s\n",pc,len(es),out);return nil}
+func cmdPack(sd,out string,ko,so int)error{ik:=byte(0x01);sk:=byte(0x02);if ko>=0{ik=byte(ko);sk=ik+1};if so>=0{sk=byte(so)};var fs[]string;filepath.Walk(sd,func(p string,i os.FileInfo,e error)error{if e!=nil||i.IsDir(){return e};fs=append(fs,p);return nil});sort.Strings(fs);pf,_:=os.Create(out);defer pf.Close();lf,_:=os.Create(out+".lst");defer lf.Close();xk:=exK(ik);var b[4]byte;binary.LittleEndian.PutUint32(b[:],uint32(len(fs))^xk);lf.Write(b[:]);for _,fp:=range fs{d,_:=os.ReadFile(fp);ext:=strings.ToLower(strings.TrimPrefix(filepath.Ext(fp),"."));bn:=strings.TrimSuffix(filepath.Base(fp),filepath.Ext(fp));po,_:=pf.Seek(0,io.SeekCurrent);binary.LittleEndian.PutUint32(b[:],uint32(po)^xk);lf.Write(b[:]);binary.LittleEndian.PutUint32(b[:],uint32(len(d))^xk);lf.Write(b[:]);sn,_:=u2s(bn);if sn==nil{sn=[]byte(bn)};nb:=make([]byte,fnSz);for i,v:=range sn{nb[i]=v^ik};lf.Write(nb);binary.LittleEndian.PutUint32(b[:],eTM[ext]);lf.Write(b[:]);if ext=="snx"{d=xB(d,sk)};pf.Write(d)};return nil}
 
 // ─── SNX ─────────────────────────────────────────────────────────────────────
 
-type SNXEntry struct {
-	Offset    uint32 // offset in string table
-	SlotSize  uint32 // total slot: 4 (len prefix) + slen
-	RawBytes  []byte // slen bytes from table (includes null)
-	SJISClean []byte // without null and \x02\x03
-	HasCtrl   bool   // had \x02\x03 suffix
-	IsDialogue bool
-}
+type SE struct{ Off, DLen uint32; Raw []byte }
 
-type SNXFile struct {
-	H0, H1   uint32
-	Bytecode []byte
-	Entries  []SNXEntry
-}
-
-func parseSNX(data []byte) (*SNXFile, error) {
-	if len(data) < 8 { return nil, fmt.Errorf("SNX too small") }
-	h0 := binary.LittleEndian.Uint32(data[0:4])
-	h1 := binary.LittleEndian.Uint32(data[4:8])
-	if int(h1) > len(data) { return nil, fmt.Errorf("str table %d > file %d", h1, len(data)) }
-	ss := uint32(len(data)) - h1
-	bc := make([]byte, ss); copy(bc, data[:ss])
-	var entries []SNXEntry
+func pSNX(d []byte) (h0, h1 uint32, bc []byte, entries []SE, err error) {
+	if len(d) < 8 { return 0,0,nil,nil,fmt.Errorf("too small") }
+	h0 = binary.LittleEndian.Uint32(d[0:4])
+	h1 = binary.LittleEndian.Uint32(d[4:8])
+	if int(h1) > len(d) { return 0,0,nil,nil,fmt.Errorf("overflow") }
+	ss := uint32(len(d)) - h1
+	bc = make([]byte, ss); copy(bc, d[:ss])
 	pos := uint32(0)
 	for pos+4 <= h1 {
-		slen := binary.LittleEndian.Uint32(data[ss+pos : ss+pos+4])
-		if slen == 0 || pos+4+slen > h1 { break }
-		raw := make([]byte, slen); copy(raw, data[ss+pos+4:ss+pos+4+slen])
-		nn := raw; if len(nn) > 0 && nn[len(nn)-1] == 0 { nn = nn[:len(nn)-1] }
-		hc := false; cl := nn
-		if len(cl) >= 2 && cl[len(cl)-2] == 0x02 && cl[len(cl)-1] == 0x03 { hc = true; cl = cl[:len(cl)-2] }
-		text, _ := sjisToUTF8(cl)
-		entries = append(entries, SNXEntry{
-			Offset: pos, SlotSize: 4 + slen, RawBytes: raw, SJISClean: cl,
-			HasCtrl: hc, IsDialogue: containsCJK(text),
-		})
-		pos += 4 + slen
+		sl := binary.LittleEndian.Uint32(d[ss+pos : ss+pos+4])
+		if sl == 0 || pos+4+sl > h1 { break }
+		r := make([]byte, sl); copy(r, d[ss+pos+4:ss+pos+4+sl])
+		entries = append(entries, SE{pos, sl, r}); pos += 4 + sl
 	}
-	return &SNXFile{H0: h0, H1: h1, Bytecode: bc, Entries: entries}, nil
+	return
 }
 
-func containsCJK(s string) bool {
-	for _, r := range s {
-		if (r >= 0x3000 && r <= 0x9FFF) || (r >= 0xF900 && r <= 0xFAFF) { return true }
-	}; return false
+func cTxt(r []byte) ([]byte, bool) {
+	d := r; if len(d)>0 && d[len(d)-1]==0 { d=d[:len(d)-1] }
+	if len(d)>=2 && d[len(d)-2]==0x02 && d[len(d)-1]==0x03 { return d[:len(d)-2], true }
+	return d, false
 }
-
-// isStringRef checks if position i in bytecode is a string table reference.
-// Pattern 1: [0x11][0x02][str_offset] - "push string" instruction
-// Pattern 2: [0x0F|0x10|0x15][str_offset] - direct string opcodes
-func isStringRef(bc []byte, i int) bool {
-	if i < 8 { return false }
-	prev := binary.LittleEndian.Uint32(bc[i-4 : i])
-	// Pattern 1: prev=0x02, prev-prev=0x11
-	if prev == 0x02 && i >= 12 {
-		pp := binary.LittleEndian.Uint32(bc[i-8 : i-4])
-		if pp == 0x11 { return true }
-	}
-	// Pattern 2: direct string opcodes
-	if prev == 0x0F || prev == 0x10 || prev == 0x15 { return true }
+func cjk(s string) bool {
+	for _, r := range s { if (r>=0x3000&&r<=0x9FFF)||(r>=0xF900&&r<=0xFAFF) { return true } }
 	return false
 }
 
-// ─── snx2txt ─────────────────────────────────────────────────────────────────
-
-func cmdSNX2TXT(snxPath, outPath string) error {
-	data, _ := os.ReadFile(snxPath)
-	snx, err := parseSNX(data); if err != nil { return err }
-	if outPath == "" { outPath = strings.TrimSuffix(snxPath, filepath.Ext(snxPath)) + ".txt" }
-	f, _ := os.Create(outPath); defer f.Close()
+func cmdSNX2TXT(sp, op string) error {
+	d, _ := os.ReadFile(sp)
+	_, _, _, entries, err := pSNX(d); if err != nil { return err }
+	if op == "" { op = strings.TrimSuffix(sp, filepath.Ext(sp)) + ".txt" }
+	f, _ := os.Create(op); defer f.Close()
 	w := bufio.NewWriter(f); defer w.Flush()
-	w.WriteString("# LCSE SNX: " + filepath.Base(snxPath) + "\r\n")
+	w.WriteString("# LCSE SNX: " + filepath.Base(sp) + "\r\n")
 	w.WriteString("# INDEX\\tOFFSET\\tTYPE\\tTEXT (Shift-JIS)\r\n#\r\n")
-	dlg := 0
-	for i, e := range snx.Entries {
-		t := "RES"
-		if e.IsDialogue { t = "TXT"; dlg++ } else {
-			ok := false; for _, b := range e.SJISClean { if b >= 0x20 && b <= 0x7E { ok = true } }
-			if !ok && len(e.SJISClean) <= 2 { t = "CTL" }
+	dl := 0
+	for i, e := range entries {
+		cl, _ := cTxt(e.Raw); txt, _ := s2u(cl)
+		t := "RES"; if cjk(txt) { t="TXT"; dl++ } else {
+			ok:=false; for _,b:=range cl{if b>=0x20&&b<=0x7E{ok=true}}
+			if !ok&&len(cl)<=2{t="CTL"}
 		}
-		fmt.Fprintf(w, "%d\t0x%04X\t%s\t", i, e.Offset, t)
-		w.Write(e.SJISClean)
-		w.WriteString("\r\n")
+		fmt.Fprintf(w, "%d\t0x%04X\t%s\t", i, e.Off, t); w.Write(cl); w.WriteString("\r\n")
 	}
-	fmt.Printf("[INFO] %s: %d strings (%d dialogue) -> %s\n", filepath.Base(snxPath), len(snx.Entries), dlg, outPath)
+	fmt.Printf("[INFO] %s: %d strings (%d dialogue) -> %s\n", filepath.Base(sp), len(entries), dl, op)
 	return nil
 }
 
-// ─── txt2snx ─────────────────────────────────────────────────────────────────
+// ─── txt2snx — FULL REBUILD + 12-byte aligned ref update ────────────────────
+// Instructions are 12 bytes: [opcode][arg1][arg2]
+// String refs: opcode=0x11, arg1=0x02, arg2=string_table_offset
 
-func cmdTXT2SNX(txtPath, snxPath, outPath string) error {
-	origData, _ := os.ReadFile(snxPath)
-	snx, err := parseSNX(origData); if err != nil { return err }
-	txtData, _ := os.ReadFile(txtPath)
-	if outPath == "" { outPath = strings.TrimSuffix(snxPath, filepath.Ext(snxPath)) + "_patched" + filepath.Ext(snxPath) }
+func cmdTXT2SNX(tp, sp, op string) error {
+	od, _ := os.ReadFile(sp)
+	h0, _, bc, entries, err := pSNX(od); if err != nil { return err }
+	td, _ := os.ReadFile(tp)
+	if op == "" { op = strings.TrimSuffix(sp, filepath.Ext(sp)) + "_patched" + filepath.Ext(sp) }
 
-	// Parse translations from SJIS text file
-	textMap := map[int][]byte{}
-	for _, line := range bytes.Split(txtData, []byte("\n")) {
+	// Parse SJIS text (4 cols: idx, off, type, text)
+	tm := map[int][]byte{}
+	for _, line := range bytes.Split(td, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
 		if len(line) == 0 || line[0] == '#' { continue }
 		parts := bytes.SplitN(line, []byte("\t"), 4)
 		if len(parts) < 4 { continue }
 		var idx int
-		if _, err := fmt.Sscanf(string(parts[0]), "%d", &idx); err != nil { continue }
-		if len(parts[3]) > 0 { textMap[idx] = append([]byte{}, parts[3]...) }
+		if _, e := fmt.Sscanf(string(parts[0]), "%d", &idx); e != nil { continue }
+		if len(parts[3]) > 0 { tm[idx] = append([]byte{}, parts[3]...) }
 	}
 
-	// Phase 1: Build new string table, keeping entries at original offsets when possible
-	newStrTable := make([]byte, snx.H1) // start with original size
-	copy(newStrTable, origData[len(origData)-int(snx.H1):]) // copy original table
+	// Validate 12-byte alignment: 8 + h0*12 + h1 must equal file size
+	expectedSize := 8 + h0*instrSz + binary.LittleEndian.Uint32(od[4:8])
+	if expectedSize != uint32(len(od)) {
+		// Non-standard SNX (extra data between bytecode and strings) — copy as-is
+		os.WriteFile(op, od, 0644)
+		fmt.Printf("[SKIP] %s: non-standard format (expected %d, got %d) -> copie intacte\n",
+			filepath.Base(sp), expectedSize, len(od))
+		return nil
+	}
 
-	oldToNew := map[uint32]uint32{} // only for relocated entries
+	// PHASE 1: Count changes first (dry run)
 	changed := 0
-	overflow := []int{}
+	for i, e := range entries {
+		if newTxt, ok := tm[i]; ok {
+			_, hc := cTxt(e.Raw)
+			var nd []byte
+			nd = append(nd, newTxt...)
+			if hc { nd = append(nd, 0x02, 0x03) }
+			nd = append(nd, 0x00)
+			if !bytes.Equal(nd, e.Raw) { changed++ }
+		}
+	}
 
-	for i, e := range snx.Entries {
-		newSJIS, ok := textMap[i]
-		if !ok { continue } // no change
+	// If ZERO changes, copy original byte-for-byte (SAFE)
+	if changed == 0 {
+		os.WriteFile(op, od, 0644)
+		origH1 := binary.LittleEndian.Uint32(od[4:8])
+		fmt.Printf("[INFO] 0 modifiees -> %s (copie intacte, %d bytes)\n", op, len(od))
+		_ = origH1
+		return nil
+	}
 
-		// Build new entry data
-		var newData []byte
-		newData = append(newData, newSJIS...)
-		if e.HasCtrl { newData = append(newData, 0x02, 0x03) }
-		newData = append(newData, 0x00) // null terminator
+	// PHASE 2: Rebuild string table — all entries packed sequentially
+	oldToNew := make(map[uint32]uint32)
+	var newTable bytes.Buffer
 
-		newSlen := uint32(len(newData))
-		origSlen := e.SlotSize - 4 // original data size (from length prefix)
+	for i, e := range entries {
+		newOff := uint32(newTable.Len())
+		oldToNew[e.Off] = newOff
 
-		if newSlen <= origSlen {
-			// Fits in original slot: write in-place with padding
-			binary.LittleEndian.PutUint32(newStrTable[e.Offset:], newSlen)
-			copy(newStrTable[e.Offset+4:], newData)
-			// Zero-pad remaining
-			for j := e.Offset + 4 + newSlen; j < e.Offset + e.SlotSize; j++ {
-				newStrTable[j] = 0
-			}
-			changed++
+		var entryData []byte
+		if newTxt, ok := tm[i]; ok {
+			_, hc := cTxt(e.Raw)
+			entryData = append(entryData, newTxt...)
+			if hc { entryData = append(entryData, 0x02, 0x03) }
+			entryData = append(entryData, 0x00)
 		} else {
-			// Overflow: append at end of table, keep original at original position
-			overflow = append(overflow, i)
-			newOffset := uint32(len(newStrTable))
-			var lenBuf [4]byte
-			binary.LittleEndian.PutUint32(lenBuf[:], newSlen)
-			newStrTable = append(newStrTable, lenBuf[:]...)
-			newStrTable = append(newStrTable, newData...)
-			oldToNew[e.Offset] = newOffset
-			changed++
+			entryData = e.Raw
 		}
+
+		var lb [4]byte
+		binary.LittleEndian.PutUint32(lb[:], uint32(len(entryData)))
+		newTable.Write(lb[:])
+		newTable.Write(entryData)
 	}
 
-	// Phase 2: Update bytecode - ONLY for relocated entries, ONLY at verified string ref positions
-	bc := make([]byte, len(snx.Bytecode))
-	copy(bc, snx.Bytecode)
-
-	if len(overflow) > 0 {
-		refsUpdated := 0
-		for i := 8; i+4 <= len(bc); i += 4 {
-			val := binary.LittleEndian.Uint32(bc[i : i+4])
-			if newOff, ok := oldToNew[val]; ok {
-				if isStringRef(bc, i) {
-					binary.LittleEndian.PutUint32(bc[i:i+4], newOff)
-					refsUpdated++
-				}
+	// PHASE 3: Update refs at 12-byte instruction boundaries
+	newBC := make([]byte, len(bc)); copy(newBC, bc)
+	refsUpdated := 0
+	for i := uint32(0); i < h0; i++ {
+		off := 8 + i*instrSz
+		opcode := binary.LittleEndian.Uint32(newBC[off : off+4])
+		arg1   := binary.LittleEndian.Uint32(newBC[off+4 : off+8])
+		arg2   := binary.LittleEndian.Uint32(newBC[off+8 : off+12])
+		if opcode == 0x11 && arg1 == 0x02 {
+			if newOff, ok := oldToNew[arg2]; ok && newOff != arg2 {
+				binary.LittleEndian.PutUint32(newBC[off+8:off+12], newOff)
+				refsUpdated++
 			}
 		}
-		// Update string table size in header
-		binary.LittleEndian.PutUint32(bc[4:8], uint32(len(newStrTable)))
-		fmt.Printf("[INFO] %d entries relocated, %d refs updated\n", len(overflow), refsUpdated)
 	}
 
-	// Write output
+	// Update h1 in header
+	binary.LittleEndian.PutUint32(newBC[4:8], uint32(newTable.Len()))
+
 	var out bytes.Buffer
-	out.Write(bc)
-	out.Write(newStrTable)
-	os.WriteFile(outPath, out.Bytes(), 0644)
-	fmt.Printf("[INFO] %d strings modifiees -> %s\n", changed, outPath)
+	out.Write(newBC); out.Write(newTable.Bytes())
+	os.WriteFile(op, out.Bytes(), 0644)
+
+	newH1 := uint32(newTable.Len())
+	origH1 := binary.LittleEndian.Uint32(od[4:8])
+	fmt.Printf("[INFO] %d modifiees, %d refs maj, table: %d -> %d (%+d) -> %s\n",
+		changed, refsUpdated, origH1, newH1, int(newH1)-int(origH1), op)
 	return nil
 }
 
-// ─── Batch ───────────────────────────────────────────────────────────────────
-
-func cmdSNX2TXTBatch(dir, outDir string) error {
-	if outDir == "" { outDir = dir + "_txt" }; os.MkdirAll(outDir, 0755)
-	m, _ := filepath.Glob(filepath.Join(dir, "*.[sS][nN][xX]"))
-	if len(m) == 0 { return fmt.Errorf("no SNX in %s", dir) }
-	fmt.Printf("[INFO] Batch: %d files\n", len(m))
-	for _, f := range m {
-		b := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
-		cmdSNX2TXT(f, filepath.Join(outDir, b+".txt"))
-	}; return nil
+func cmdSNX2TXTBatch(d, od string) error {
+	if od=="" { od=d+"_txt" }; os.MkdirAll(od, 0755)
+	m,_:=filepath.Glob(filepath.Join(d,"*.[sS][nN][xX]"))
+	if len(m)==0{return fmt.Errorf("no SNX")}
+	for _,f:=range m{b:=strings.TrimSuffix(filepath.Base(f),filepath.Ext(f));cmdSNX2TXT(f,filepath.Join(od,b+".txt"))}
+	return nil
 }
 func cmdTXT2SNXBatch(td, sd, od string) error {
-	if od == "" { od = sd + "_patched" }; os.MkdirAll(od, 0755)
-	m, _ := filepath.Glob(filepath.Join(td, "*.txt"))
-	if len(m) == 0 { return fmt.Errorf("no TXT in %s", td) }
-	for _, f := range m {
-		b := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
-		sp := filepath.Join(sd, b+".SNX")
-		if _, e := os.Stat(sp); e != nil { sp = filepath.Join(sd, b+".snx")
-			if _, e := os.Stat(sp); e != nil { continue } }
-		cmdTXT2SNX(f, sp, filepath.Join(od, b+".snx"))
-	}; return nil
+	if od=="" { od=sd+"_patched" }; os.MkdirAll(od, 0755)
+	m,_:=filepath.Glob(filepath.Join(td,"*.txt"))
+	if len(m)==0{return fmt.Errorf("no TXT")}
+	for _,f:=range m{b:=strings.TrimSuffix(filepath.Base(f),filepath.Ext(f));sp:=filepath.Join(sd,b+".SNX");if _,e:=os.Stat(sp);e!=nil{sp=filepath.Join(sd,b+".snx");if _,e:=os.Stat(sp);e!=nil{continue}};cmdTXT2SNX(f,sp,filepath.Join(od,b+".snx"))}
+	return nil
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+func usage(){fmt.Fprintf(os.Stderr,`lcse-tool v0.6.1 - LC-ScriptEngine
 
-func usage() {
-	fmt.Fprintf(os.Stderr, `lcse-tool v4 - LC-ScriptEngine (One ~Kagayaku Kisetsu e~)
+PLUS DE LIMITE DE TAILLE sur les traductions !
+La table de chaines est reconstruite et les references mises a jour
+par scan 12-octets aligne (format d'instruction LCSE confirme).
 
 ARCHIVE:
   lcse-tool unpack <lcsebody> [output_dir]
-  lcse-tool patch <lcsebody_original> <dossier_patches> <sortie>
-  lcse-tool pack <dossier> <sortie>
+  lcse-tool patch <original> <patches_dir> <sortie>
+  lcse-tool pack <dir> <sortie>
 
 SCRIPTS:
-  lcse-tool snx2txt <fichier.snx|dossier> [sortie]
-  lcse-tool txt2snx <texte.txt> <original.snx> [sortie.snx]
-  lcse-tool txt2snx-batch <dossier_txt> <dossier_snx> [dossier_sortie]
+  lcse-tool snx2txt <file.snx|dir> [output]
+  lcse-tool txt2snx <text.txt> <original.snx> [output.snx]
+  lcse-tool txt2snx-batch <txt_dir> <snx_dir> [output_dir]
 
-OPTIONS:  --key <hex>  --snxkey <hex>  (default: auto-detect)
-`)
-}
+OPTIONS:  --key <hex>  --snxkey <hex>
+`)}
 
-func main() {
-	args := os.Args[1:]; ko, so := -1, -1; var pos []string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--key": if i+1<len(args) { var k int; fmt.Sscanf(args[i+1],"%x",&k); ko=k; i++ }
-		case "--snxkey": if i+1<len(args) { var k int; fmt.Sscanf(args[i+1],"%x",&k); so=k; i++ }
-		case "-h","--help": usage(); os.Exit(0)
-		default: pos = append(pos, args[i])
-		}
-	}
-	if len(pos) < 1 { usage(); os.Exit(1) }
-	cmd, ca := pos[0], pos[1:]
-	var err error
-	switch cmd {
-	case "unpack","u":
-		if len(ca)<1 { usage(); os.Exit(1) }
-		od := ca[0]+"_extracted"; if len(ca)>=2 { od=ca[1] }
-		err = cmdUnpack(ca[0], od, ko, so)
-	case "patch":
-		if len(ca)<3 { usage(); os.Exit(1) }
-		err = cmdPatch(ca[0], ca[1], ca[2], ko, so)
-	case "pack","p":
-		if len(ca)<2 { usage(); os.Exit(1) }
-		err = cmdPack(ca[0], ca[1], ko, so)
-	case "snx2txt","s2t":
-		if len(ca)<1 { usage(); os.Exit(1) }
-		o:=""; if len(ca)>=2 { o=ca[1] }
-		if inf,_:=os.Stat(ca[0]); inf!=nil && inf.IsDir() { err=cmdSNX2TXTBatch(ca[0],o) } else { err=cmdSNX2TXT(ca[0],o) }
-	case "txt2snx","t2s":
-		if len(ca)<2 { usage(); os.Exit(1) }
-		o:=""; if len(ca)>=3 { o=ca[2] }
-		err = cmdTXT2SNX(ca[0], ca[1], o)
-	case "txt2snx-batch","t2s-batch":
-		if len(ca)<2 { usage(); os.Exit(1) }
-		o:=""; if len(ca)>=3 { o=ca[2] }
-		err = cmdTXT2SNXBatch(ca[0], ca[1], o)
-	default: fmt.Fprintf(os.Stderr, "Commande inconnue: %s\n", cmd); usage(); os.Exit(1)
-	}
-	if err != nil { fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err); os.Exit(1) }
+func main(){
+	args:=os.Args[1:];ko,so:=-1,-1;var pos[]string
+	for i:=0;i<len(args);i++{switch args[i]{
+	case "--key":if i+1<len(args){var k int;fmt.Sscanf(args[i+1],"%x",&k);ko=k;i++}
+	case "--snxkey":if i+1<len(args){var k int;fmt.Sscanf(args[i+1],"%x",&k);so=k;i++}
+	case "-h","--help":usage();os.Exit(0)
+	default:pos=append(pos,args[i])}}
+	if len(pos)<1{usage();os.Exit(1)}
+	cmd,ca:=pos[0],pos[1:];var err error
+	switch cmd{
+	case "unpack","u":if len(ca)<1{usage();os.Exit(1)};od:=ca[0]+"_extracted";if len(ca)>=2{od=ca[1]};err=cmdUnpack(ca[0],od,ko,so)
+	case "patch":if len(ca)<3{usage();os.Exit(1)};err=cmdPatch(ca[0],ca[1],ca[2],ko,so)
+	case "pack","p":if len(ca)<2{usage();os.Exit(1)};err=cmdPack(ca[0],ca[1],ko,so)
+	case "snx2txt","s2t":if len(ca)<1{usage();os.Exit(1)};o:="";if len(ca)>=2{o=ca[1]};if inf,_:=os.Stat(ca[0]);inf!=nil&&inf.IsDir(){err=cmdSNX2TXTBatch(ca[0],o)}else{err=cmdSNX2TXT(ca[0],o)}
+	case "txt2snx","t2s":if len(ca)<2{usage();os.Exit(1)};o:="";if len(ca)>=3{o=ca[2]};err=cmdTXT2SNX(ca[0],ca[1],o)
+	case "txt2snx-batch","t2s-batch":if len(ca)<2{usage();os.Exit(1)};o:="";if len(ca)>=3{o=ca[2]};err=cmdTXT2SNXBatch(ca[0],ca[1],o)
+	default:fmt.Fprintf(os.Stderr,"Unknown: %s\n",cmd);os.Exit(1)}
+	if err!=nil{fmt.Fprintf(os.Stderr,"[ERROR] %v\n",err);os.Exit(1)}
 }
