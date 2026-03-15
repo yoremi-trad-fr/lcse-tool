@@ -1,7 +1,7 @@
 # lcse-tool v0.7
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
-Developpe pour la traduction francaise de **One ~Kagayaku Kisetsu e~ Vista (2007)**.
+Developpé pour la traduction francaise [en cours] de **One Kagayaku Kisetsu e Vista (2007)**.
 
 ## Installation
 
