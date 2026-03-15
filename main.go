@@ -17,6 +17,74 @@ import (
 
 const (fnSz = 0x40; lstESz = fnSz + 12; instrSz = 12)
 
+// Accent mapping: Unicode rune -> SJIS user-defined 2-byte code
+// SJIS F0xx -> Unicode PUA U+E0xx (confirmed via cp932)
+var accentToSJIS = map[rune][2]byte{
+	'é': {0xF0, 0x40}, 'è': {0xF0, 0x41}, 'ç': {0xF0, 0x42},
+	'à': {0xF0, 0x43}, 'â': {0xF0, 0x44}, 'û': {0xF0, 0x45},
+	'ô': {0xF0, 0x46}, 'ê': {0xF0, 0x47}, 'î': {0xF0, 0x48},
+	'ù': {0xF0, 0x49}, 'ë': {0xF0, 0x4A}, 'ï': {0xF0, 0x4B},
+	'ü': {0xF0, 0x4C},
+}
+
+// Fallback for accents not in the font: strip to base letter
+var accentFallback = map[rune]byte{
+	'À': 'A', 'Â': 'A', 'Ç': 'C', 'È': 'E', 'É': 'E', 'Ê': 'E',
+	'Î': 'I', 'Ô': 'O', 'Ù': 'U', 'Û': 'U', 'Œ': 'O',
+	'œ': 'o',
+}
+
+// utf8ToSJISWithAccents converts UTF-8 text to SJIS, mapping accents to user-defined area
+func utf8ToSJISAccents(s string) []byte {
+	var out []byte
+	for _, r := range s {
+		if sjis, ok := accentToSJIS[r]; ok {
+			out = append(out, sjis[0], sjis[1])
+		} else if fb, ok := accentFallback[r]; ok {
+			out = append(out, fb)
+		} else if r < 0x80 {
+			out = append(out, byte(r))
+		} else {
+			// Try SJIS encoding for CJK etc
+			enc, err := u2s(string(r))
+			if err == nil && len(enc) > 0 {
+				out = append(out, enc...)
+			} else {
+				out = append(out, '?')
+			}
+		}
+	}
+	return out
+}
+
+// isUTF8 checks if data is valid UTF-8 (with optional BOM)
+func isUTF8(data []byte) bool {
+	// Strip BOM
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF { return true }
+	// Check for multi-byte UTF-8 sequences (accented chars)
+	for i := 0; i < len(data)-1; i++ {
+		if data[i] >= 0xC0 && data[i] <= 0xDF && data[i+1] >= 0x80 && data[i+1] <= 0xBF {
+			return true // Found a 2-byte UTF-8 sequence
+		}
+	}
+	return false
+}
+
+// parseTextLine extracts the text field from a TSV line, converting UTF-8 accents if needed
+func parseTextLine(line []byte, utf8Mode bool) (int, []byte, bool) {
+	if len(line) == 0 || line[0] == '#' { return -1, nil, false }
+	parts := bytes.SplitN(line, []byte("\t"), 4)
+	if len(parts) < 4 { return -1, nil, false }
+	var idx int
+	if _, e := fmt.Sscanf(string(parts[0]), "%d", &idx); e != nil { return -1, nil, false }
+	text := parts[3]
+	if len(text) == 0 { return idx, nil, false }
+	if utf8Mode {
+		text = utf8ToSJISAccents(string(text))
+	}
+	return idx, append([]byte{}, text...), true
+}
+
 var tEM = map[uint32]string{1:"snx",2:"bmp",3:"png",4:"wav",5:"ogg"}
 var eTM = map[string]uint32{"snx":1,"bmp":2,"png":3,"wav":4,"ogg":5}
 
@@ -71,8 +139,10 @@ func cmdSNX2TXT(sp, op string) error {
 	if op == "" { op = strings.TrimSuffix(sp, filepath.Ext(sp)) + ".txt" }
 	f, _ := os.Create(op); defer f.Close()
 	w := bufio.NewWriter(f); defer w.Flush()
+	// UTF-8 BOM so Notepad++ opens as UTF-8 automatically
+	w.Write([]byte{0xEF, 0xBB, 0xBF})
 	w.WriteString("# LCSE SNX: " + filepath.Base(sp) + "\r\n")
-	w.WriteString("# INDEX\\tOFFSET\\tTYPE\\tTEXT (Shift-JIS)\r\n#\r\n")
+	w.WriteString("# INDEX\\tOFFSET\\tTYPE\\tTEXT (UTF-8)\r\n#\r\n")
 	dl := 0
 	for i, e := range entries {
 		cl, _ := cTxt(e.Raw); txt, _ := s2u(cl)
@@ -80,9 +150,9 @@ func cmdSNX2TXT(sp, op string) error {
 			ok:=false; for _,b:=range cl{if b>=0x20&&b<=0x7E{ok=true}}
 			if !ok&&len(cl)<=2{t="CTL"}
 		}
-		fmt.Fprintf(w, "%d\t0x%04X\t%s\t", i, e.Off, t); w.Write(cl); w.WriteString("\r\n")
+		fmt.Fprintf(w, "%d\t0x%04X\t%s\t%s\r\n", i, e.Off, t, txt)
 	}
-	fmt.Printf("[INFO] %s: %d strings (%d dialogue) -> %s\n", filepath.Base(sp), len(entries), dl, op)
+	fmt.Printf("[INFO] %s: %d strings (%d dialogue) -> %s [UTF-8]\n", filepath.Base(sp), len(entries), dl, op)
 	return nil
 }
 
@@ -96,16 +166,19 @@ func cmdTXT2SNX(tp, sp, op string) error {
 	td, _ := os.ReadFile(tp)
 	if op == "" { op = strings.TrimSuffix(sp, filepath.Ext(sp)) + "_patched" + filepath.Ext(sp) }
 
-	// Parse SJIS text (4 cols: idx, off, type, text)
+	// Parse text file — auto-detect UTF-8 vs SJIS
+	utf8Mode := isUTF8(td)
+	if utf8Mode {
+		// Strip BOM if present
+		if len(td) >= 3 && td[0] == 0xEF && td[1] == 0xBB && td[2] == 0xBF { td = td[3:] }
+		fmt.Printf("[INFO] Detected UTF-8 input (accents will be mapped to SJIS user-defined area)\n")
+	}
 	tm := map[int][]byte{}
 	for _, line := range bytes.Split(td, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
-		if len(line) == 0 || line[0] == '#' { continue }
-		parts := bytes.SplitN(line, []byte("\t"), 4)
-		if len(parts) < 4 { continue }
-		var idx int
-		if _, e := fmt.Sscanf(string(parts[0]), "%d", &idx); e != nil { continue }
-		if len(parts[3]) > 0 { tm[idx] = append([]byte{}, parts[3]...) }
+		idx, text, ok := parseTextLine(line, utf8Mode)
+		if !ok || text == nil { continue }
+		tm[idx] = text
 	}
 
 	// Validate 12-byte alignment: 8 + h0*12 + h1 must equal file size
@@ -209,11 +282,11 @@ func cmdTXT2SNXBatch(td, sd, od string) error {
 	return nil
 }
 
-func usage(){fmt.Fprintf(os.Stderr,`lcse-tool v0.6.1 - LC-ScriptEngine
+func usage(){fmt.Fprintf(os.Stderr,`lcse-tool v0.7 - LC-ScriptEngine
 
-PLUS DE LIMITE DE TAILLE sur les traductions !
-La table de chaines est reconstruite et les references mises a jour
-par scan 12-octets aligne (format d'instruction LCSE confirme).
+Supporte les accents francais via la zone SJIS user-defined (0xF040+).
+Les fichiers texte UTF-8 avec accents sont automatiquement detectes.
+Utiliser lcse_hook.dll + lcse_launcher.exe pour le rendu dans le jeu.
 
 ARCHIVE:
   lcse-tool unpack <lcsebody> [output_dir]

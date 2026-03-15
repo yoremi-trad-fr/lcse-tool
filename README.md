@@ -1,107 +1,105 @@
-# lcse-tool v0.6.1
+# lcse-tool v0.7
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
 Developpe pour la traduction francaise de **One ~Kagayaku Kisetsu e~ Vista (2007)**.
 
-## Compatibilite
-
-| Composant | One ~Vista | Autres jeux LCSE | Notes |
-|-----------|-----------|------------------|-------|
-| `unpack` / `pack` / `patch` | Teste | Compatible | Cle auto-detectee depuis le .lst |
-| `snx2txt` (export) | Teste | Compatible | Format de la table de chaines commun |
-| `txt2snx` (injection) | Teste | Compatible | Scan 12-octets aligne, zero faux positifs |
-
-### Jeux utilisant LC-ScriptEngine (liste non-exhaustive)
-MOON.DVD, One ~Kagayaku Kisetsu e~, Mugen Renkan, Kuroinu, et autres titres Tactics/Nexton.
-La cle XOR varie par titre (`0x01` pour One ~Vista, `0x02` pour Mugen Renkan, `0xCC` pour MOON.DVD).
-
 ## Installation
 
-Binaires pre-compiles dans le zip :
-- **Windows** : `lcse-tool.exe`
-- **Linux** : `lcse-tool`
+```
+lcse-tool.exe          Outil principal (Windows x64)
+lcse-tool              Outil principal (Linux x64)
+Extract.py             Extraire les dialogues pour traduction
+Reinject.py            Reinjecter les dialogues traduits
+Hook/lcse_launcher.exe Lanceur du jeu (charge la police custom)
+Hook/lcse_hook.dll     Hook police (espacement proportionnel)
+Hook/lcse_hook.ini     Configuration (nom de la police)
+Hook/lcse_font.ttf     Police custom (optionnel)
+```
 
 ## Workflow de traduction
 
+### 1. Preparation (une seule fois)
 ```bash
-# 1. Extraire l'archive (cle auto-detectee)
 lcse-tool unpack lcsebody1 extracted/
-
-# 2. Exporter les scripts en texte Shift-JIS
 lcse-tool snx2txt extracted/ scripts/
-
-# 3. Editer les .txt avec Notepad++ (encodage Shift-JIS)
-#    Remplacer le texte japonais directement par le francais
-
-# 4. Reinjecter
-lcse-tool txt2snx-batch scripts/ extracted/ patched/
-
-# 5. Patcher l'archive originale
-lcse-tool patch lcsebody1 patched/ lcsebody1_fr
-
-# 6. Copier lcsebody1_fr + lcsebody1_fr.lst dans le dossier du jeu
-#    (renommer en lcsebody1 + lcsebody1.lst)
 ```
 
-### Notes importantes
-- **Toujours patcher l'archive originale**, jamais une archive deja patchee.
-- Les traductions peuvent etre plus longues que l'original : la table de chaines
-  est reconstruite automatiquement et les references mises a jour.
-- Les fichiers SNX non-standard (comme `NECEMEM.snx`) sont detectes et copies
-  sans modification.
-- Les fichiers sans changement sont copies byte-for-byte (zero risque).
+### 2. Traduction (pour chaque fichier)
+```bash
+python Extract.py
+# -> Entrer le nom du fichier (ex: NV30.txt)
+# -> Cree NV30_extracted.tsv (UTF-8 BOM)
+# -> Traduire les lignes dans le TSV avec un editeur de texte
+python Reinject.py
+# -> Entrer le nom du fichier (ex: NV30.txt)
+# -> Cree NV30_patched.txt (UTF-8 BOM)
+# -> Copier NV30_patched.txt vers scripts/NV30.txt
+```
 
-## Format des fichiers .txt
+### 3. Injection et patch
+```bash
+lcse-tool txt2snx-batch scripts/ extracted/ patched/
+lcse-tool patch lcsebody1 patched/ lcsebody1_fr
+```
 
-Fichier TSV en Shift-JIS, 4 colonnes :
+### 4. Installation dans le jeu
+```
+Copier lcsebody1_fr    -> dossier du jeu (renommer en lcsebody1)
+Copier lcsebody1_fr.lst -> dossier du jeu (renommer en lcsebody1.lst)
+Copier Hook/*          -> dossier du jeu
+Lancer via lcse_launcher.exe
+```
 
+## Format des fichiers
+
+### scripts/*.txt (UTF-8 BOM, genere par snx2txt)
 ```
 # LCSE SNX: NV30.snx
-# INDEX\tOFFSET\tTYPE\tTEXT (Shift-JIS)
+# INDEX\tOFFSET\tTYPE\tTEXT (UTF-8)
 #
 0    0x0000    RES    bg_b
-1    0x0009    RES    bgchange
 3    0x0020    TXT    とても幸せだった…
-4    0x0039    TXT    それが日常であることをぼくは...
+6    0x009B    TXT    ありがとう、と。
 ```
 
-Types :
-- **TXT** : dialogue (a traduire)
-- **RES** : nom de ressource (ne pas modifier)
-- **CTL** : code de controle (ne pas modifier)
+### *_extracted.tsv (UTF-8 BOM, genere par Extract.py)
+```
+index    original
+3    とても幸せだった…
+6    ありがとう、と。
+```
+Remplacer le texte japonais par le francais directement dans ce fichier.
 
-## Commandes
+## Commandes lcse-tool
 
 ```
 lcse-tool unpack <lcsebody> [output_dir]
-lcse-tool patch <lcsebody_original> <dossier_patches> <sortie>
-lcse-tool pack <dossier> <sortie>
-lcse-tool snx2txt <fichier.snx|dossier> [sortie]
-lcse-tool txt2snx <texte.txt> <original.snx> [sortie.snx]
-lcse-tool txt2snx-batch <dossier_txt> <dossier_snx> [dossier_sortie]
+lcse-tool patch <lcsebody_original> <patches_dir> <sortie>
+lcse-tool pack <dir> <sortie>
+lcse-tool snx2txt <file.snx|dir> [output]
+lcse-tool txt2snx <text.txt> <original.snx> [output.snx]
+lcse-tool txt2snx-batch <txt_dir> <snx_dir> [output_dir]
 ```
 
 Options : `--key <hex>` et `--snxkey <hex>` pour forcer les cles XOR.
 
-## Architecture technique
+## Notes techniques
 
-### Format SNX
-```
-[uint32 instruction_count]   — nombre d'instructions (h0)
-[uint32 str_table_size]      — taille de la table de chaines (h1)
-[instructions: h0 * 12B]    — bytecode (12 octets par instruction)
-[table de chaines: h1 B]    — entrees consecutives [uint32 len][data]
-```
+- Les fichiers SNX utilisent des instructions de 12 octets : `[opcode][arg1][arg2]`
+- Les references aux chaines sont : `[0x11][0x02][offset_table_chaines]`
+- La table de chaines est reconstruite integralement lors de l'injection
+- Les fichiers SNX non-standard (NECEMEM) sont copies sans modification
+- Les fichiers sans changement sont copies byte-for-byte
+- L'encodage est detecte automatiquement (UTF-8 BOM ou Shift-JIS)
 
-Chaque instruction : `[opcode 4B][arg1 4B][arg2 4B]`
-- `[0x11][0x02][offset]` = push string (reference a la table)
-- `[0x11][0x00][valeur]` = push int (entier brut, ne pas modifier)
+## Hook police (optionnel)
 
-### Methode d'injection (v0.6+)
-1. Reconstruction de la table de chaines avec les traductions
-2. Scan du bytecode a pas de 12 octets (taille d'une instruction)
-3. Seules les instructions `[0x11][0x02][X]` sont mises a jour
-4. Zero faux positifs garanti par l'alignement sur les frontieres d'instruction
+Le dossier `Hook/` contient un lanceur + DLL pour charger une police custom.
+Cela permet un meilleur espacement des lettres latines.
+
+- `lcse_hook.ini` : configurer le nom de la police
+- `lcse_font.ttf` : police custom (doit etre dans le dossier du jeu)
+- Lancer le jeu via `lcse_launcher.exe` au lieu de `lcsebody.exe`
 
 ## Compilation
 
@@ -109,8 +107,6 @@ Chaque instruction : `[opcode 4B][arg1 4B][arg2 4B]`
 go build -o lcse-tool .
 GOOS=windows GOARCH=amd64 go build -o lcse-tool.exe .
 ```
-
-Dependance : `golang.org/x/text` (encodage Shift-JIS)
 
 ## Credits
 

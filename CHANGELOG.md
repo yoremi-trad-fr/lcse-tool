@@ -1,26 +1,44 @@
 # CHANGELOG
 
+## v0.7 (2026-03-15) — UTF-8 + Font Hook + Scripts extraction
+
+### Nouvelles fonctionnalites
+- **Export UTF-8 BOM** : `snx2txt` exporte desormais en UTF-8 avec BOM.
+  Les fichiers s'ouvrent directement en UTF-8 dans Notepad++ avec le japonais
+  lisible et editable.
+- **Import UTF-8** : `txt2snx` detecte automatiquement l'encodage (UTF-8 BOM
+  ou Shift-JIS) et convertit correctement vers SJIS pour le moteur.
+- **Mapping accents** : les caracteres accentues (e, e, c, a, a, u, o, e, i,
+  u, e, i, u) sont convertis en codes SJIS user-defined (F040-F04C) pour
+  compatibilite avec une police custom. Les accents non-supportes sont
+  remplaces par leur lettre de base.
+- **Scripts Python** : `Extract.py` et `Reinject.py` pour extraire les lignes
+  de dialogue et les reinjecter apres traduction, avec detection automatique
+  de l'encodage.
+- **Font Hook (DLL)** : `lcse_hook.dll` + `lcse_launcher.exe` pour charger
+  une police custom (`lcse_font.ttf`) au lieu de MS Gothic. Permet un
+  espacement proportionnel des lettres latines.
+
+### Workflow complet
+```
+lcse-tool unpack lcsebody1 extracted/      # Extraire l'archive
+lcse-tool snx2txt extracted/ scripts/      # SNX -> TXT (UTF-8 BOM)
+python Extract.py                          # Extraire les dialogues -> TSV
+  (traduire le TSV)
+python Reinject.py                         # Reinjecter les dialogues
+lcse-tool txt2snx-batch scripts/ extracted/ patched/  # TXT -> SNX
+lcse-tool patch lcsebody1 patched/ lcsebody1_fr       # Patcher l'archive
+```
+
+---
+
 ## v0.6.1 (2026-03-14) — Protection fichiers non-standard + copie intacte
 
 ### Bugfix critique
 - **Corrige le crash au lancement** cause par la corruption de `NECEMEM.snx`,
   un fichier SNX non-standard qui ne suit pas le format `8 + h0*12 + h1 = taille`.
-
-### Cause racine
-Le moteur LCSE charge les fichiers dans l'ordre du `.lst`. Si un seul fichier
-change de taille sans raison, tous les offsets suivants de l'archive sont decales
-et le moteur lit des donnees corrompues des le demarrage.
-
-`NECEMEM.snx` contient des donnees supplementaires entre le bytecode et la table
-de chaines (258 octets non-alignes). La v0.6 tentait de reconstruire sa table,
-echouait, et produisait un fichier tronque de 46 octets.
-
-### Corrections
-- **Detection des SNX non-standard** : si `8 + h0*12 + h1 != taille_fichier`,
-  le fichier est copie byte-for-byte sans modification (`[SKIP]` dans le log).
-- **Copie intacte si 0 modifications** : quand `txt2snx` detecte qu'aucune
-  chaine n'a ete modifiee, le fichier original est copie tel quel au lieu d'etre
-  reconstruit. Elimine tout risque de corruption silencieuse.
+- **Detection des SNX non-standard** : copie byte-for-byte sans modification.
+- **Copie intacte si 0 modifications** : elimine tout risque de corruption.
 
 ---
 
@@ -28,119 +46,65 @@ echouait, et produisait un fichier tronque de 46 octets.
 
 ### Correction fondamentale
 - **Supprime la limite de taille des traductions.** La table de chaines est
-  entierement reconstruite et les references sont mises a jour de maniere fiable.
-
-### Cause racine des crashs v0.3-v0.5
-Le format d'instruction LCSE est de **12 octets** : `[opcode 4B][arg1 4B][arg2 4B]`.
-Les versions precedentes scannaient le bytecode a pas de 4 octets, causant des
-collisions entre valeurs entieres et references de chaines.
-
-Specifiquement, l'opcode `0x11` ("push literal") utilise `arg1` comme type :
-- `arg1 = 0x02` → `arg2` est un **offset dans la table de chaines**
-- `arg1 = 0x00` → `arg2` est un **entier brut** (variable, compteur, flag)
-
-Sur NV30.snx, **22 entiers** avaient par coincidence la meme valeur qu'un offset
-de chaine. Les versions v0.3-v0.5, qui scannaient a 4 octets, les corrompaient
-systematiquement → crash du moteur.
-
-### Solution
-- **Scan a pas de 12 octets** (stride = taille d'une instruction).
-- Seules les instructions `[0x11][0x02][offset]` a des frontieres d'instruction
-  valides sont mises a jour.
-- Verification exhaustive sur NV30.snx : **1063 refs trouvees = 1063 entrees**
-  dans la table, **0 faux positifs**, **0 references manquees**.
-
-### Source de la decouverte
-Reverse-engineering du bytecode LCSE par analyse d'un decompileur Rust
-(`lcsebody-main`) dont le fichier `bytecode notes.txt` documente le format
-12 octets et les types de l'opcode `0x11`.
+  entierement reconstruite et les references mises a jour de maniere fiable.
+- **Scan a pas de 12 octets** (taille d'une instruction LCSE).
+  Seules les instructions `[0x11][0x02][offset]` sont mises a jour.
+- Verification : **1063 refs = 1063 entrees, 0 faux positifs**.
+- Source : reverse-engineering du bytecode LCSE via decompileur Rust
+  (`bytecode notes.txt` : instructions 12 octets, opcode 0x11 types).
 
 ---
 
-## v0.5.1 (2026-03-13) — Ecriture en place sans modification du bytecode
+## v0.5.1 (2026-03-13) — Ecriture en place (approche temporaire)
 
-### Approche temporaire (abandonnee en v0.6)
-- Ecriture strictement en place, sans jamais modifier le bytecode.
-- Ajout d'une colonne `MAXLEN` dans le format TXT pour indiquer la taille
-  maximale de chaque entree.
-- Troncature automatique des traductions trop longues avec avertissement.
-
-### Probleme
-548 lignes sur 1063 devaient etre tronquees (le francais est ~28% plus gros
-que le japonais en Shift-JIS). Approche non viable pour la traduction.
+- Ecriture strictement en place, sans modification du bytecode.
+- Troncature des traductions trop longues. Abandonne en v0.6.
 
 ---
 
-## v0.5 (2026-03-13) — Reconstruction complete de la table (regression)
+## v0.5 (2026-03-13) — Reconstruction complete (regression)
 
-### Modification
-- Reconstruction de la table de chaines de zero au lieu de la relocation en fin
-  de table (v0.4). Toutes les entrees sont empaquetees sequentiellement.
-
-### Probleme
-Le scan a 4 octets corrompait toujours les 22 entiers coincidant avec des offsets.
-De plus, le fichier `NECEMEM.snx` non-standard etait corrompu lors de la
-reconstruction, tronquant l'archive de 46 octets et empechant le jeu de demarrer.
+- Reconstruction de la table de zero. Crash du a NECEMEM + faux positifs.
 
 ---
 
-## v0.4.1 (2026-03-13) — Correction ecriture en place
+## v0.4.1 (2026-03-13) — Correction slen
 
-### Bugfix
-- **Corrige la corruption sequentielle de la table de chaines** : la v0.4
-  mettait a jour le prefixe `slen` avec la nouvelle taille (plus courte), ce qui
-  desynchronisait le parseur sequentiel du moteur.
-
-### Correction
-- Conservation du `slen` original dans le prefixe de longueur. Le padding nul
-  apres le texte est inoffensif car la chaine est terminee par `\x00`.
+- Conservation du slen original dans le prefixe de longueur.
 
 ---
 
-## v0.4 (2026-03-13) — Relocation en fin de table (debut du scan par pattern)
+## v0.4 (2026-03-13) — Relocation en fin de table
 
-### Approche
-- Ecriture en place pour les traductions plus courtes.
-- Relocation en fin de table pour les traductions plus longues.
-- Premier scan par pattern (`[0x11][0x02]`, `[0x0F]`, `[0x10]`, `[0x15]`)
-  au lieu de mise a jour aveugle.
-
-### Probleme
-Le scan a pas de 4 octets confondait `[0x11][0x00][entier]` avec
-`[0x11][0x02][offset]`, corrompant 22 valeurs entieres sur NV30.snx.
-Crash du moteur a `lcsebody+0x11d21`.
+- Premier scan par pattern (`[0x11][0x02]`).
+- Crash du au scan a 4 octets (faux positifs sur entiers).
 
 ---
 
-## v0.3 (2026-03-10) — Mise a jour sans filtre (regression)
+## v0.3 (2026-03-10) — Mise a jour sans filtre
 
-### Modification
-- Mise a jour de TOUTE valeur correspondant a un ancien offset de chaine,
-  sans filtre par opcode. Corrigeait les 21 references manquees de la v0.2
-  mais introduisait des faux positifs massifs.
+- Mise a jour de toute valeur correspondant a un offset. Faux positifs massifs.
 
 ---
 
-## v0.2 (2026-03-10) — Shift-JIS natif, patch mode, format simplifie
+## v0.2 (2026-03-10) — Shift-JIS natif, patch mode
 
-### Nouvelles fonctionnalites
-- Commande `patch` pour remplacer uniquement les fichiers modifies.
-- Sortie Shift-JIS native (plus de conversion UTF-8).
-- Format 4 colonnes au lieu de 5.
-- Auto-detection de la cle XOR depuis le `.lst`.
+- Commande `patch`, sortie Shift-JIS, format 4 colonnes, auto-detection cle XOR.
 
 ---
 
 ## v0.1 (2026-03-09) — Version initiale
 
-### Fonctionnalites
 - `unpack`, `pack`, `snx2txt`, `txt2snx`, modes batch.
 - Reverse-engineering du format SNX et de l'archive LST.
 
-### References techniques
-- [GARbro](https://github.com/morkt/GARbro) — `ArcFormats/Tactics/ArcLST.cs`
+---
+
+## References techniques
+
+- [GARbro](https://github.com/morkt/GARbro) — format LST/Nexton
 - [LCSELocalizationTools](https://github.com/cqjjjzr/LCSELocalizationTools) — outil Java
 - [LCScriptEngineTools](https://github.com/fengberd/LCScriptEngineTools) — script PHP
-- [The MOON Kit](https://www.asceai.net/moonkit/) — documentation SNX (MOON.DVD)
-- [lcsebody-main](https://github.com/) — decompileur Rust, documentation bytecode 12 octets
+- [The MOON Kit](https://www.asceai.net/moonkit/) — documentation SNX
+- lcsebody-main (decompileur Rust) — documentation bytecode 12 octets
 - Desassemblage de `lcsebody.exe` avec Capstone x86
