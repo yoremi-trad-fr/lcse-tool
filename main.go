@@ -17,14 +17,16 @@ import (
 
 const (fnSz = 0x40; lstESz = fnSz + 12; instrSz = 12)
 
-// Accent mapping: Unicode rune -> SJIS user-defined 2-byte code
-// SJIS F0xx -> Unicode PUA U+E0xx (confirmed via cp932)
-var accentToSJIS = map[rune][2]byte{
-	'é': {0xF0, 0x40}, 'è': {0xF0, 0x41}, 'ç': {0xF0, 0x42},
-	'à': {0xF0, 0x43}, 'â': {0xF0, 0x44}, 'û': {0xF0, 0x45},
-	'ô': {0xF0, 0x46}, 'ê': {0xF0, 0x47}, 'î': {0xF0, 0x48},
-	'ù': {0xF0, 0x49}, 'ë': {0xF0, 0x4A}, 'ï': {0xF0, 0x4B},
-	'ü': {0xF0, 0x4C},
+// Accent mapping: Unicode rune -> single-byte code (half-width katakana range)
+// Using 0xA1-0xAD so the engine treats them as single-byte (half-width = 12px)
+// The hook DLL intercepts GetGlyphOutlineA for these codes and returns
+// the real Unicode accent glyph.
+var accentToSJIS = map[rune]byte{
+	'é': 0xA1, 'è': 0xA2, 'ç': 0xA3,
+	'à': 0xA4, 'â': 0xA5, 'û': 0xA6,
+	'ô': 0xA7, 'ê': 0xA8, 'î': 0xA9,
+	'ù': 0xAA, 'ë': 0xAB, 'ï': 0xAC,
+	'ü': 0xAD,
 }
 
 // Fallback for accents not in the font: strip to base letter
@@ -34,12 +36,12 @@ var accentFallback = map[rune]byte{
 	'œ': 'o',
 }
 
-// utf8ToSJISWithAccents converts UTF-8 text to SJIS, mapping accents to user-defined area
+// utf8ToSJISWithAccents converts UTF-8 text to SJIS, mapping accents to single-byte codes
 func utf8ToSJISAccents(s string) []byte {
 	var out []byte
 	for _, r := range s {
-		if sjis, ok := accentToSJIS[r]; ok {
-			out = append(out, sjis[0], sjis[1])
+		if sb, ok := accentToSJIS[r]; ok {
+			out = append(out, sb) // Single byte!
 		} else if fb, ok := accentFallback[r]; ok {
 			out = append(out, fb)
 		} else if r < 0x80 {
@@ -282,9 +284,9 @@ func cmdTXT2SNXBatch(td, sd, od string) error {
 	return nil
 }
 
-func usage(){fmt.Fprintf(os.Stderr,`lcse-tool v0.7 - LC-ScriptEngine
+func usage(){fmt.Fprintf(os.Stderr,`lcse-tool v0.8 - LC-ScriptEngine
 
-Supporte les accents francais via la zone SJIS user-defined (0xF040+).
+Supporte les accents francais via encodage single-byte (0xA1-0xAD).
 Les fichiers texte UTF-8 avec accents sont automatiquement detectes.
 Utiliser lcse_hook.dll + lcse_launcher.exe pour le rendu dans le jeu.
 

@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## v0.8 (2026-03-29) — Accents français fonctionnels
+
+### Changement d'encodage des accents
+- **Single-byte (0xA1-0xAD)** au lieu de double-byte SJIS (F040-F04C).
+  Le moteur LCSE code en dur l'avance du curseur : 24px pour les double-byte,
+  12px pour les single-byte. L'ancien encodage produisait un espace parasite
+  après chaque accent. La plage half-width katakana (0xA1-0xAD) est utilisée
+  car le moteur la traite comme single-byte (avance 12px).
+
+### Hook GetGlyphOutlineA (remplace CreateFontIndirectA seul)
+- **Découverte** : le moteur n'utilise ni `TextOutA` ni `ExtTextOutA`.
+  Il appelle `GetGlyphOutlineA` (format `GGO_GRAY4_BITMAP`) pour obtenir le
+  bitmap de chaque glyphe, puis le compose via `BitBlt`/`StretchBlt`.
+  Identifié par analyse des imports PE de `lcsebody.exe`.
+- **Hook `GetGlyphOutlineA`** : intercepte les bytes 0xA1-0xAD et appelle
+  `GetGlyphOutlineW` avec le vrai codepoint Unicode (ex: 0xA1 → U+00E9 = é).
+  Court-circuite entièrement le mapping SJIS → PUA.
+- **Fix sign-extension** : le moteur passe les caractères via `char` signé.
+  Le byte 0xA1 (-95) arrive comme `0xFFFFFFA1` après cast en `UINT`.
+  Le hook masque avec `& 0xFF` pour détecter la plage correctement.
+
+### Police
+- **MS Gothic par défaut** : police Unicode complète, contient tous les accents
+  français nativement. Pas besoin de police custom ni de glyphes PUA.
+- Le hook `CreateFontIndirectA` est conservé pour la substitution de police
+  (le moteur demande `ＭＳ ゴシック` fullwidth depuis INIT.snx entrées 12-15).
+
+### Problèmes résolus (historique de debug)
+1. **v0.7** : hook `CreateFontIndirectA` seul — police substituée mais accents
+   affichés en "A" (le moteur n'utilise pas TextOutA).
+2. **INI incorrect** : `Name=UD Digi Kyokasho N` au lieu de `N-R` — la police
+   n'était jamais sélectionnée par Windows.
+3. **Police sans PUA** : glyphes absents aux positions U+E000-U+E00C — patchée
+   via fontTools, mais rendu toujours en "A" car `GetGlyphOutlineA` ne résolvait
+   pas le mapping cp932 → PUA correctement.
+4. **TextOutA/ExtTextOutA absents de l'IAT** : confirmé par le log v2
+   (`FAILED to patch`). Le moteur utilise `GetGlyphOutlineA` exclusivement.
+5. **Hook GetGlyphOutlineA (v3)** : accents enfin visibles, mais espacement
+   double (24px) car les bytes F040-F04C sont double-byte SJIS.
+6. **Passage single-byte (v0.8)** : bytes 0xA1-0xAD, avance correcte de 12px.
+   Mais le hook ne matchait pas — le byte 0xA1 arrivait comme 0xFFFFFFA1.
+7. **Fix sign-extension (v5.2)** : masque `& 0xFF`, accents fonctionnels.
+
+---
+
 ## v0.7 (2026-03-15) — UTF-8 + Font Hook + Scripts extraction
 
 ### Nouvelles fonctionnalites
