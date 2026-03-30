@@ -24,26 +24,14 @@ lcse-tool unpack lcsebody1 extracted/
 lcse-tool snx2txt extracted/ scripts/
 ```
 
-### 2. Traduction (pour chaque fichier)
-```bash
-python Extract.py
-# -> Entrer le nom du fichier (ex: NV30.txt)
-# -> Crée NV30_extracted.tsv (UTF-8 BOM)
-# -> Traduire les lignes dans le TSV
-python Reinject.py
-# -> Entrer le nom du fichier (ex: NV30.txt)
-# -> Crée NV30_patched.txt (UTF-8 BOM)
-# -> Copier NV30_patched.txt vers scripts/NV30.txt
-```
-
-### 3. Injection et patch
+### 2. Injection et patch
 ```bash
 lcse-tool txt2snx-batch scripts/ extracted/ patched/
 lcse-tool patch lcsebody1 patched/ lcsebody1_fr
 ```
 Pour les CG modifiés, les placer dans le dossier `patched/` avant la commande finale.
 
-### 4. Installation dans le jeu
+### 3. Installation dans le jeu
 ```
 Copier lcsebody1_fr      -> dossier du jeu (renommer en lcsebody1)
 Copier lcsebody1_fr.lst  -> dossier du jeu (renommer en lcsebody1.lst)
@@ -169,14 +157,6 @@ les références dans le bytecode sont mises à jour.
 Les fichiers SNX non-standard (ex: `NECEMEM.snx`) sont détectés et copiés sans
 modification pour éviter toute corruption.
 
-## Conventions de traduction
-
-- Pas de suffixes honorifiques sauf `senpai`
-- `...` pour les ellipses (pas `…`)
-- Présent de narration comme temps par défaut
-- Style infinitif pour les choix de branches
-- Tags moteur `se_` conservés tels quels
-- Numéros de ligne jamais modifiés (servent d'offsets binaires)
 
 ## Historique des versions
 
