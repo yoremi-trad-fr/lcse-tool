@@ -1,7 +1,7 @@
 # lcse-tools v0.8
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
-Développé pour la traduction française de **One Kagayaku Kisetsu e Vista (2007)**.
+Développé pour la traduction française de **One ~Kagayaku Kisetsu e~ Vista (2007)**.
 
 ## Contenu
 
@@ -16,28 +16,21 @@ Hook/lcse_hook.ini       Configuration
 Hook/lcse_font.ttf       Police custom (optionnel)
 ```
 
-## Workflow de traduction
+## Usage
 
-### 1. Préparation (une seule fois)
+### Préparation (une seule fois)
 ```bash
 lcse-tool unpack lcsebody1 extracted/
 lcse-tool snx2txt extracted/ scripts/
 ```
 
-### 2. Injection et patch
+### Injection et patch
 ```bash
 lcse-tool txt2snx-batch scripts/ extracted/ patched/
 lcse-tool patch lcsebody1 patched/ lcsebody1_fr
 ```
 Pour les CG modifiés, les placer dans le dossier `patched/` avant la commande finale.
 
-### 3. Installation dans le jeu
-```
-Copier lcsebody1_fr      -> dossier du jeu (renommer en lcsebody1)
-Copier lcsebody1_fr.lst  -> dossier du jeu (renommer en lcsebody1.lst)
-Copier Hook/*            -> dossier du jeu
-Lancer via lcse_launcher.exe
-```
 
 ## Commandes
 
@@ -205,6 +198,11 @@ GOOS=windows GOARCH=386 go build -o lcse-tool.exe .
 - [LCScriptEngineTools](https://github.com/fengberd/LCScriptEngineTools) — script PHP
 - [The MOON Kit](https://www.asceai.net/moonkit/) — documentation SNX
 - lcsebody-main (décompileur Rust) — documentation bytecode 12 octets
+
+## Licence
+
+MIT
+
 
 ## Licence
 
