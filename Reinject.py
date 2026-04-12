@@ -1,5 +1,4 @@
 from pathlib import Path
-import csv
 
 def detect_encoding(filepath):
     """Detect UTF-8 BOM or Shift-JIS"""
@@ -29,23 +28,47 @@ def main():
     print(f"[INFO] Source : {src_enc}")
     print(f"[INFO] Traduction : {tsv_enc}")
 
-    # Read translations
+    # Read translations (raw tab-split, skip header)
     translations = {}
-    with open(translation_file, "r", encoding=tsv_enc, errors="replace") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            idx = row.get("index")
-            text = row.get("original")
-            if idx and text is not None:
-                translations[idx] = text.strip()
+    tsv_content = translation_file.read_text(encoding=tsv_enc, errors="replace")
+    tsv_lines = tsv_content.splitlines()
+    for i, line in enumerate(tsv_lines):
+        if i == 0:  # skip header
+            continue
+        if not line:
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            translations[parts[0]] = parts[1]
 
-    # Read original
+    # Read original and build lookup of original texts
     try:
         content = original_file.read_text(encoding=src_enc, errors="replace")
         src_lines = content.splitlines()
     except Exception as e:
         print(f"Erreur lors de la lecture de l'original : {e}")
         return
+
+    originals = {}
+    for line in src_lines:
+        if not line or line.startswith("#"):
+            continue
+        p = line.split("\t", 3)
+        if len(p) >= 4 and p[2] == "TXT":
+            originals[p[0]] = p[3]
+
+    # Clean csv quoting artifact: leading " added by csv.DictWriter
+    # but preserve intentional dialogue quotes (paired "...")
+    cleaned = 0
+    for idx, text in translations.items():
+        if idx in originals and text.startswith('"') and not originals[idx].startswith('"'):
+            # If text also ends with ", it's intentional dialogue quoting → keep
+            if text.endswith('"') and len(text) > 2:
+                continue
+            translations[idx] = text[1:]
+            cleaned += 1
+    if cleaned:
+        print(f"[INFO] {cleaned} ligne(s) nettoyee(s) (guillemet csv parasite)")
 
     # Patch
     new_lines = []
@@ -55,7 +78,7 @@ def main():
             new_lines.append(line)
             continue
         
-        parts = line.split("\t")
+        parts = line.split("\t", 3)  # max 4 champs: index, offset, type, text
         if len(parts) >= 4:
             idx = parts[0]
             if parts[2] == "TXT" and idx in translations:

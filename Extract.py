@@ -1,5 +1,4 @@
 from pathlib import Path
-import csv
 
 def main():
     filename = input("Quel fichier voulez-vous extraire ? (ex: DS01.txt) : ").strip()
@@ -15,11 +14,9 @@ def main():
     raw = original_file.read_bytes()
     if raw[:3] == b'\xef\xbb\xbf':
         encoding = "utf-8-sig"
-        out_encoding = "utf-8-sig"
         print(f"[INFO] Encodage detecte : UTF-8 (BOM)")
     else:
         encoding = "shift_jis"
-        out_encoding = "utf-8-sig"  # Always output UTF-8 BOM for editing comfort
         print(f"[INFO] Encodage detecte : Shift-JIS -> sortie en UTF-8")
 
     extracted_data = []
@@ -32,18 +29,14 @@ def main():
             if not line or line.startswith("#"):
                 continue
             
-            parts = line.split("\t")
+            parts = line.split("\t", 3)  # max 4 champs: index, offset, type, text
             if len(parts) >= 4 and parts[2] == "TXT":
-                extracted_data.append({
-                    "index": parts[0],
-                    "original": parts[3]
-                })
+                extracted_data.append((parts[0], parts[3]))
 
-        fieldnames = ["index", "original"]
-        with open(output_file, "w", encoding=out_encoding, newline="", errors="replace") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
-            writer.writeheader()
-            writer.writerows(extracted_data)
+        with open(output_file, "w", encoding="utf-8-sig", newline="") as f:
+            f.write("index\toriginal\n")
+            for idx, text in extracted_data:
+                f.write(f"{idx}\t{text}\n")
 
         print(f"Extraction terminee avec succes !")
         print(f"  Lignes TXT extraites : {len(extracted_data)}")
