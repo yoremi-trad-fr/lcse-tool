@@ -14,6 +14,32 @@ Hook/lcse_launcher.exe   Lanceur du jeu (injection DLL)
 Hook/lcse_hook.dll       Hook GDI (accents + police)
 Hook/lcse_hook.ini       Configuration
 Hook/lcse_font.ttf       Police custom (optionnel)
+GUI-Sources/             Interface Wails/Svelte pour piloter le workflow
+```
+
+## Interface graphique
+
+La GUI se trouve dans `GUI-Sources/` et produit `build/bin/LCSEToolGUI.exe`.
+Elle détecte `lcse-tool.exe` à côté du binaire, dans le dossier du dépôt, ou via
+sélection manuelle depuis la barre du haut.
+Elle embarque aussi un dossier `GUI-Sources/bin/` pour les outils wrapper
+utilisés par les workflows ONE/MOON (`lcse-tool.exe`, `moon_asm.exe`,
+`moon_extractTGF.exe`, etc.). Pour MOON, `bin/moon_scripts/` contient les
+sources assembleur du kit, utilisees par l'onglet **SNX <-> TXT** en mode MOON.
+Le kit hook ONE est place dans `bin/one_hook/` et peut etre installe/configure
+depuis l'onglet **Hook ONE**.
+
+Organisation de la GUI :
+- **Preparation** : extraction ONE/MOON et generation des TXT.
+- **Import/export dialogues** : fichiers `.dlg.txt` pour ONE/MOON.
+- **SNX <-> TXT** : conversion dans les deux sens, fichier ou batch.
+- **TGF <-> PNG** : extraction/conversion des images MOON vers PNG.
+- **Rebuild archive** : patch/pack d'archives sans mention de langue cible.
+- **Hook ONE** : edition de `lcse_hook.ini` et installation du kit.
+
+```bash
+cd GUI-Sources
+wails build
 ```
 
 ## Usage
@@ -44,6 +70,23 @@ Pour les CG modifiés, les placer dans le dossier `patched/` avant la commande f
 | `lcse-tool txt2snx-batch <txt/> <snx/> [out/]` | Batch TXT → SNX |
 
 Options : `--key <hex>` et `--snxkey <hex>` pour forcer les clés XOR.
+
+### Archives MOON.
+
+`unpack` et `patch` détectent aussi le format LST ancien de **MOON.**
+(`moon_jp`, `moon_eng`) : entrées de 44 octets, noms de fichiers avec extension
+incluse, clé LST `0xCC`, SNX chiffrés `0xAA` pour `moon_jp` ou en clair pour
+`moon_eng`.
+
+```bash
+lcse-tool unpack MOON/moon_eng MOON/_tool_extract_eng
+lcse-tool patch MOON/moon_eng MOON/_tool_extract_eng MOON/moon_fr
+```
+
+Note : les `.SNX` de MOON. sont un format plus ancien que ceux de One/LCSE
+Vista ; `snx2txt`/`txt2snx` ne s'appliquent pas à ces scripts.
+Dans la GUI, utiliser **SNX <-> TXT** avec le jeu **MOON** pour generer les
+scripts TXT traduisibles, puis assembler les TXT modifies en SNX.
 
 ## Système d'accents français
 
