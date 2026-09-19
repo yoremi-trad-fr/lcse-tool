@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## v1.2 (2026-09-19) — Chaîne MOON complète
+
+- Nouveau désassembleur du bytecode SNX ancien de MOON, sans dépendance aux
+  sources pré-désassemblées du MOON Kit.
+- Détection par fichier du XOR `0xAA`, nécessaire à l'archive anglaise mixte.
+- Gestion du fragment orphelin après `EOF` dans `INIT.snx` japonais.
+- Conversion vérifiée des 131 SNX anglais ; exclusion automatique des 6
+  anciens scripts japonais non scindés lors du rebuild des 125 scripts actifs.
+- Aller-retour de masse validé avec `moon_asm.exe`, sans perte de commandes ni
+  de texte (la coupure automatique des lignes peut être recalculée).
+- Aller-retour également validé sur les 119 SNX japonais ; échappement ciblé
+  des caractères Shift-JIS dont l'octet final `0x5C` trompe `moon_asm.exe`.
+- Export/import validé sur 122 fichiers et 26 244 lignes de dialogue.
+- Accents français UTF-8 convertis après assemblage vers les octets single-byte
+  `0xA1-0xAD`, sans modifier les opcodes.
+- Ajout d'un lanceur MOON et installation du hook depuis la GUI.
+- Les erreurs de conversion batch sont maintenant remontées au lieu d'être
+  ignorées silencieusement.
+
+## v1.1 (2026-08-02) — Workflow MOON et noms de fichiers
+
+- Detection des sources pre-desassemblees du MOON Kit a proximite du dossier
+  extrait et prise en charge des 125 scripts, y compris les scripts scindes.
+- Messages et interface clarifies : les anciens SNX de MOON ne sont pas
+  desassembles directement.
+- Decodage CP932/Shift-JIS des noms stockes dans les archives MOON afin de
+  conserver correctement les noms japonais sous Windows.
+- Reencodage Shift-JIS de ces noms lors du rebuild d'une archive MOON.
+- Correction de l'echappement des dialogues (`\\n`, `\\t`, `\\\\` et
+  apostrophes dans `SETSTATUS`).
+
 ## v0.8 (2026-03-29) — Accents français fonctionnels
 
 ### Changement d'encodage des accents

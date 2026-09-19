@@ -12,6 +12,8 @@ export function GetOneHookConfig():Promise<Record<string, string>>;
 
 export function GetToolPaths():Promise<Record<string, string>>;
 
+export function InstallMoonHook(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function InstallOneHook(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function MoonAssembleScripts(arg1:string,arg2:string):Promise<string>;

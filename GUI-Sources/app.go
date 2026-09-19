@@ -283,7 +283,11 @@ func (a *App) selectFile(title string, pattern string, desc string) string {
 func (a *App) log(msg string) {
 	if a.ctx != nil {
 		wailsRuntime.EventsEmit(a.ctx, "log", msg)
+		return
 	}
+	// Keep command-line/integration runs diagnosable when no Wails context is
+	// active. Regular GUI builds continue to emit only through the UI event.
+	fmt.Println(msg)
 }
 
 func (a *App) logOK(msg string) {
@@ -486,7 +490,7 @@ func (a *App) SaveOneHookConfig(fontName, debugLog string) string {
 		a.oneHookDir = a.findDir([]string{"one_hook", "Hook_v5.1"})
 	}
 	if a.oneHookDir == "" {
-		a.logError("Kit hook ONE introuvable dans bin/one_hook.")
+		a.logError("Kit hook introuvable dans bin/one_hook.")
 		return "ERROR"
 	}
 	if strings.TrimSpace(fontName) == "" {
@@ -499,7 +503,7 @@ func (a *App) SaveOneHookConfig(fontName, debugLog string) string {
 		a.logError(err.Error())
 		return "ERROR"
 	}
-	a.logOK("Parametres hook ONE enregistres.")
+	a.logOK("Parametres du hook enregistres.")
 	return "OK"
 }
 
@@ -527,6 +531,36 @@ func (a *App) InstallOneHook(gameDir, fontName, debugLog string) string {
 		a.log(fmt.Sprintf("%s -> %s", name, gameDir))
 	}
 	a.logOK("Kit hook ONE installe.")
+	return "OK"
+}
+
+func (a *App) InstallMoonHook(gameDir, fontName, debugLog string) string {
+	if gameDir == "" {
+		a.logError("Dossier du jeu MOON requis.")
+		return "ERROR"
+	}
+	if !fileExists(filepath.Join(gameDir, "MOON_eng.EXE")) {
+		a.logError("MOON_eng.EXE introuvable dans le dossier choisi.")
+		return "ERROR"
+	}
+	if a.SaveOneHookConfig(fontName, debugLog) != "OK" {
+		return "ERROR"
+	}
+	a.logSection("INSTALL HOOK MOON")
+	files := []string{"moon_launcher.exe", "lcse_hook.dll", "lcse_hook.ini"}
+	for _, name := range files {
+		src := filepath.Join(a.oneHookDir, name)
+		if !fileExists(src) {
+			a.logError(fmt.Sprintf("%s introuvable dans le kit hook.", name))
+			return "ERROR"
+		}
+		if err := copyFile(src, filepath.Join(gameDir, name)); err != nil {
+			a.logError(err.Error())
+			return "ERROR"
+		}
+		a.log(fmt.Sprintf("%s -> %s", name, gameDir))
+	}
+	a.logOK("Kit hook MOON installe. Lance le jeu avec moon_launcher.exe.")
 	return "OK"
 }
 
@@ -688,7 +722,7 @@ func (a *App) MoonScriptsToUTF(inputDir, outputDir string) BatchResult {
 	if len(files) == 0 {
 		msg := "Aucun script .txt trouve dans le dossier source."
 		if countFilesWithExt(inputDir, ".snx") > 0 {
-			msg = "Ce dossier contient des SNX MOON, pas des sources assembleur .txt. Utilise les sources MOON integrees pour creer les scripts UTF-8."
+			msg = "Ce dossier contient des SNX MOON. Utilise MOON SNX vers TXT pour les desassembler directement en UTF-8."
 		}
 		a.logError(msg)
 		return BatchResult{Status: "ERROR", Detail: msg}
@@ -721,11 +755,9 @@ func (a *App) MoonBundledScriptsToUTF(outputDir string) BatchResult {
 		a.logError("Dossier de sortie UTF-8 requis.")
 		return BatchResult{Status: "ERROR", Detail: "Parametres manquants"}
 	}
+	a.moonScripts = a.resolveMoonScripts("")
 	if a.moonScripts == "" {
-		a.moonScripts = a.findDir([]string{"moon_scripts"})
-	}
-	if a.moonScripts == "" {
-		msg := "Sources MOON integrees introuvables dans bin/moon_scripts."
+		msg := moonScriptsMissingMessage()
 		a.logError(msg)
 		return BatchResult{Status: "ERROR", Detail: msg}
 	}
@@ -738,63 +770,95 @@ func (a *App) MoonSNXToTXT(inputPath, outputPath string) string {
 		a.logError("Fichier ou dossier SNX MOON requis.")
 		return "ERROR"
 	}
-	if a.moonScripts == "" {
-		a.moonScripts = a.findDir([]string{"moon_scripts"})
-	}
-	if a.moonScripts == "" {
-		a.logError("Sources MOON integrees introuvables dans bin/moon_scripts.")
-		return "ERROR"
-	}
-	a.logSection("MOON SNX -> TXT")
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		a.logError(err.Error())
 		return "ERROR"
 	}
+	a.logSection("MOON SNX -> TXT")
+	a.log("Desassemblage direct du bytecode MOON vers des scripts UTF-8.")
 	if info.IsDir() {
 		if outputPath == "" {
 			outputPath = inputPath + "_txt"
 		}
-		if err := os.MkdirAll(outputPath, 0755); err != nil {
-			a.logError(err.Error())
-			return "ERROR"
-		}
-		files, err := snxFiles(inputPath)
-		if err != nil {
-			a.logError(err.Error())
-			return "ERROR"
-		}
-		if len(files) == 0 {
-			a.logError("Aucun SNX trouve.")
-			return "ERROR"
-		}
-		done, skipped := 0, 0
-		for _, file := range files {
-			base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-			out := filepath.Join(outputPath, base+".txt")
-			if err := a.copyMoonScriptForSNX(file, out); err != nil {
-				a.log(fmt.Sprintf("[SKIP] %s: %v", filepath.Base(file), err))
-				skipped++
-				continue
-			}
-			done++
-		}
-		if done == 0 {
-			a.logError("Aucun TXT MOON cree.")
-			return "ERROR"
-		}
-		a.logOK(fmt.Sprintf("%d scripts TXT crees, %d ignores", done, skipped))
-		return "OK"
 	}
 	if outputPath == "" {
 		outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".txt"
 	}
-	if err := a.copyMoonScriptForSNX(inputPath, outputPath); err != nil {
-		a.logError(err.Error())
+	if err := a.runLCSE("snx2txt", inputPath, outputPath); err != nil {
 		return "ERROR"
 	}
-	a.logOK("Script TXT cree.")
+	a.logOK("Scripts MOON UTF-8 crees.")
 	return "OK"
+}
+
+func moonScriptsMissingMessage() string {
+	return "Sources optionnelles du MOON Kit introuvables. Pour un SNX extrait d'une archive, utilise la conversion directe MOON SNX vers TXT."
+}
+
+func isMoonScriptsDir(path string) bool {
+	if !dirExists(path) {
+		return false
+	}
+	for _, name := range []string{"INIT.txt", "A_D2.txt", "DAY01A.txt"} {
+		if fileExists(filepath.Join(path, name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) resolveMoonScripts(inputPath string) string {
+	if isMoonScriptsDir(a.moonScripts) {
+		return a.moonScripts
+	}
+	if found := a.findDir([]string{"moon_scripts"}); isMoonScriptsDir(found) {
+		return found
+	}
+
+	anchor := inputPath
+	if anchor != "" {
+		if info, err := os.Stat(anchor); err == nil && !info.IsDir() {
+			anchor = filepath.Dir(anchor)
+		}
+	}
+
+	candidates := []string{}
+	addCandidates := func(dir string) {
+		if dir == "" || dir == "." {
+			return
+		}
+		candidates = append(candidates,
+			dir,
+			filepath.Join(dir, "moon_scripts"),
+			filepath.Join(dir, "scripts"),
+		)
+	}
+	addCandidates(anchor)
+	if anchor != "" {
+		parent := filepath.Dir(anchor)
+		addCandidates(parent)
+		if entries, err := os.ReadDir(parent); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					addCandidates(filepath.Join(parent, entry.Name()))
+				}
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		key := strings.ToLower(filepath.Clean(candidate))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if isMoonScriptsDir(candidate) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (a *App) copyMoonScriptForSNX(snxPath, outputPath string) error {
@@ -835,6 +899,7 @@ func (a *App) MoonTXTToSNX(txtFile, outputSNX string) string {
 	defer os.RemoveAll(tmp)
 	tmpScripts := filepath.Join(tmp, "scripts")
 	tmpPatch := filepath.Join(tmp, "patch")
+	tmpFinal := filepath.Join(tmp, "final")
 	if err := os.MkdirAll(tmpScripts, 0755); err != nil {
 		a.logError(err.Error())
 		return "ERROR"
@@ -865,10 +930,14 @@ func (a *App) MoonTXTToSNX(txtFile, outputSNX string) string {
 		a.logError("SNX assemble introuvable dans le dossier patch temporaire.")
 		return "ERROR"
 	}
+	finalized := filepath.Join(tmpFinal, filepath.Base(built))
+	if err := a.runLCSE("moon-accents", built, finalized); err != nil {
+		return "ERROR"
+	}
 	if outputSNX == "" {
 		outputSNX = strings.TrimSuffix(txtFile, filepath.Ext(txtFile)) + ".snx"
 	}
-	if err := copyFile(built, outputSNX); err != nil {
+	if err := copyFile(finalized, outputSNX); err != nil {
 		a.logError(err.Error())
 		return "ERROR"
 	}
@@ -882,7 +951,7 @@ func (a *App) MoonExportDialogues(scriptsDir, outputDir string) BatchResult {
 		return BatchResult{Status: "ERROR", Detail: "Parametres manquants"}
 	}
 	a.logSection("MOON EXPORT DIALOGUES")
-	files, err := txtFiles(scriptsDir)
+	files, err := moonActiveTxtFiles(scriptsDir)
 	if err != nil {
 		a.logError(err.Error())
 		return BatchResult{Status: "ERROR", Detail: err.Error()}
@@ -1041,6 +1110,7 @@ func (a *App) MoonAssembleScripts(scriptsDir, outputPatchDir string) string {
 	defer os.RemoveAll(tmp)
 	tmpScripts := filepath.Join(tmp, "scripts")
 	tmpPatch := filepath.Join(tmp, "patch")
+	tmpFinal := filepath.Join(tmp, "final")
 	if err := os.MkdirAll(tmpScripts, 0755); err != nil {
 		a.logError(err.Error())
 		return "ERROR"
@@ -1056,11 +1126,14 @@ func (a *App) MoonAssembleScripts(scriptsDir, outputPatchDir string) string {
 	if err := a.runExecutable(a.moonAsm, tmp); err != nil {
 		return "ERROR"
 	}
+	if err := a.runLCSE("moon-accents", tmpPatch, tmpFinal); err != nil {
+		return "ERROR"
+	}
 	if err := os.MkdirAll(outputPatchDir, 0755); err != nil {
 		a.logError(err.Error())
 		return "ERROR"
 	}
-	count, err := copyFilesByExt(tmpPatch, outputPatchDir, ".snx")
+	count, err := copyFilesByExt(tmpFinal, outputPatchDir, ".snx")
 	if err != nil {
 		a.logError(err.Error())
 		return "ERROR"
@@ -1492,7 +1565,7 @@ func importMoonDialogueFile(scriptFile, dialogueFile, outputFile string) (int, e
 		if tag == "TEXT" {
 			lines[i] = prefix + "TEXT " + replacement.Text
 		} else {
-			lines[i] = prefix + "SETSTATUS '" + strings.ReplaceAll(replacement.Text, "'", "’") + "' "
+			lines[i] = prefix + "SETSTATUS '" + strings.ReplaceAll(replacement.Text, "'", "\\'") + "'"
 		}
 		changed++
 	}
@@ -1595,14 +1668,31 @@ func escapeMoonCell(s string) string {
 }
 
 func unescapeMoonCell(s string) string {
-	s = strings.ReplaceAll(s, "\\n", "\n")
-	s = strings.ReplaceAll(s, "\\t", "\t")
-	s = strings.ReplaceAll(s, "\\\\", "\\")
-	return s
+	var out strings.Builder
+	out.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			out.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n':
+			out.WriteByte('\n')
+		case 't':
+			out.WriteByte('\t')
+		case '\\':
+			out.WriteByte('\\')
+		default:
+			out.WriteByte('\\')
+			out.WriteByte(s[i])
+		}
+	}
+	return out.String()
 }
 
 func copyScriptsAsShiftJIS(inputDir, outputDir string) error {
-	files, err := txtFiles(inputDir)
+	files, err := moonActiveTxtFiles(inputDir)
 	if err != nil {
 		return err
 	}
@@ -1619,12 +1709,132 @@ func copyScriptsAsShiftJIS(inputDir, outputDir string) error {
 	return nil
 }
 
+var moonLegacySplitScripts = map[string][]string{
+	"DAY01":  {"DAY01A", "DAY01B"},
+	"DAY02":  {"DAY02A", "DAY02B"},
+	"DAY03":  {"DAY03A", "DAY03B"},
+	"DAY07T": {"DAY07TA", "DAY07TB"},
+	"DAY08":  {"DAY08A", "DAY08B"},
+	"DAY20":  {"DAY20A", "DAY20B"},
+}
+
+// English MOON archives retain six encrypted, unsplit Japanese scripts next
+// to the active A/B replacements. The originals exceed the 64 KiB VM limit
+// after an English/French rebuild, so exclude them whenever both replacements
+// are present. They remain available in the raw disassembly for auditing.
+func moonActiveTxtFiles(dir string) ([]string, error) {
+	files, err := txtFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	present := map[string]bool{}
+	for _, file := range files {
+		present[strings.ToUpper(strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)))] = true
+	}
+	active := make([]string, 0, len(files))
+	for _, file := range files {
+		base := strings.ToUpper(strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)))
+		parts, legacy := moonLegacySplitScripts[base]
+		if legacy {
+			allParts := true
+			for _, part := range parts {
+				if !present[part] {
+					allParts = false
+					break
+				}
+			}
+			if allParts {
+				continue
+			}
+		}
+		active = append(active, file)
+	}
+	return active, nil
+}
+
+var moonAccentToSentinel = map[rune]byte{
+	'é': 0x02, 'è': 0x03, 'ç': 0x04,
+	'à': 0x06, 'â': 0x07, 'û': 0x08,
+	'ô': 0x0E, 'ê': 0x0F, 'î': 0x10,
+	'ù': 0x11, 'ë': 0x12, 'ï': 0x13,
+	'ü': 0x14,
+}
+
+var moonAccentFallback = map[rune]byte{
+	'À': 'A', 'Â': 'A', 'Ç': 'C', 'È': 'E', 'É': 'E', 'Ê': 'E',
+	'Î': 'I', 'Ô': 'O', 'Ù': 'U', 'Û': 'U', 'Œ': 'O', 'œ': 'o',
+}
+
+func encodeMoonAssemblerSource(content string) ([]byte, error) {
+	var out bytes.Buffer
+	values := []rune(content)
+	atLineStart := true
+	escapeShiftJISTrail := false
+	for index := 0; index < len(values); index++ {
+		value := values[index]
+		if atLineStart {
+			lineEnd := index
+			for lineEnd < len(values) && values[lineEnd] != '\n' {
+				lineEnd++
+			}
+			line := strings.TrimLeft(string(values[index:lineEnd]), "\ufeff \t\r")
+			escapeShiftJISTrail = strings.HasPrefix(line, "TEXT ")
+			atLineStart = false
+		}
+		if value == '\\' && index+1 < len(values) {
+			if values[index+1] == '\\' {
+				out.WriteString("\\\\")
+				index++
+				continue
+			}
+			if values[index+1] == 'n' {
+				// 0x01 breaks read from an existing SNX are soft layout breaks.
+				// Let moon_asm recompute wrapping for the translated text instead
+				// of forcing the old English/Japanese layout.
+				if index > 0 && index+2 < len(values) && values[index-1] <= 0xFF && values[index+2] <= 0xFF {
+					// In Latin text, the soft break also separates two words.
+					out.WriteByte(' ')
+				}
+				index++
+				continue
+			}
+		}
+		if sentinel, ok := moonAccentToSentinel[value]; ok {
+			out.WriteByte(sentinel)
+			continue
+		}
+		if fallback, ok := moonAccentFallback[value]; ok {
+			out.WriteByte(fallback)
+			continue
+		}
+		reader := transform.NewReader(strings.NewReader(string(value)), japanese.ShiftJIS.NewEncoder())
+		encoded, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, fmt.Errorf("caractere non pris en charge U+%04X: %w", value, err)
+		}
+		// moon_asm's TEXT parser treats 0x5C as an escape byte even when it is
+		// the trail byte of a Shift-JIS character (for example 構 = 8D 5C).
+		// Doubling that trail byte makes the assembler emit the original pair;
+		// quoted command arguments do not need this workaround.
+		if escapeShiftJISTrail && len(encoded) == 2 && encoded[1] == 0x5C {
+			out.WriteByte(encoded[0])
+			out.WriteByte(encoded[1])
+			out.WriteByte(encoded[1])
+			continue
+		}
+		out.Write(encoded)
+		if value == '\n' {
+			atLineStart = true
+		}
+	}
+	return out.Bytes(), nil
+}
+
 func writeShiftJIS(path string, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil && filepath.Dir(path) != "." {
 		return err
 	}
-	reader := transform.NewReader(strings.NewReader(content), japanese.ShiftJIS.NewEncoder())
-	data, err := io.ReadAll(reader)
+	data, err := encodeMoonAssemblerSource(content)
 	if err != nil {
 		return err
 	}

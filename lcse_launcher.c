@@ -1,10 +1,12 @@
 /*
- * lcse_launcher.exe - Launches lcsebody.exe with lcse_hook.dll injected
- * Can be renamed freely (e.g. ONE_launcher.exe)
+ * lcse_launcher.exe - Launches ONE or MOON with lcse_hook.dll injected.
+ * Optional command line: executable name. Without it, lcsebody.exe is tried
+ * first, then MOON_eng.EXE.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
@@ -23,14 +25,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Set working directory to our folder (critical!) */
     SetCurrentDirectoryA(dir);
 
-    /* Build paths */
-    wsprintfA(exePath, "%slcsebody.exe", dir);
+    /* Select target. A separate moon_launcher.exe can also be produced by
+       replacing the equal-length ASCII string lcsebody.exe with MOON_eng.EXE
+       in the legacy launcher binary. */
+    const char *target = "lcsebody.exe";
+    if (lpCmdLine && lpCmdLine[0]) {
+        while (*lpCmdLine == ' ' || *lpCmdLine == '\"') lpCmdLine++;
+        target = lpCmdLine;
+        char *quote = strchr(target, '\"');
+        if (quote) *quote = '\0';
+    } else {
+        wsprintfA(exePath, "%s%s", dir, target);
+        if (GetFileAttributesA(exePath) == INVALID_FILE_ATTRIBUTES)
+            target = "MOON_eng.EXE";
+    }
+    wsprintfA(exePath, "%s%s", dir, target);
     wsprintfA(dllPath, "%slcse_hook.dll", dir);
 
     /* Check files exist */
     if (GetFileAttributesA(exePath) == INVALID_FILE_ATTRIBUTES) {
         char msg[MAX_PATH + 64];
-        wsprintfA(msg, "lcsebody.exe not found!\n\nSearched in:\n%s", dir);
+        wsprintfA(msg, "%s not found!\n\nSearched in:\n%s", target, dir);
         MessageBoxA(NULL, msg, "LCSE Launcher", MB_ICONERROR);
         return 1;
     }
@@ -48,7 +63,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     
     if (!CreateProcessA(exePath, NULL, NULL, NULL, FALSE,
                         CREATE_SUSPENDED, NULL, dir, &si, &pi)) {
-        MessageBoxA(NULL, "Failed to start lcsebody.exe", "LCSE Launcher", MB_ICONERROR);
+        MessageBoxA(NULL, "Failed to start target executable", "LCSE Launcher", MB_ICONERROR);
         return 1;
     }
 

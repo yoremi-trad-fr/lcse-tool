@@ -200,7 +200,10 @@ func pLST(p string, k byte, f LSTFormat) ([]LE, error) {
 				nb[j] ^= k
 				nl = j + 1
 			}
-			name := string(nb[:nl])
+			name, err := s2u(nb[:nl])
+			if err != nil {
+				return nil, fmt.Errorf("decode MOON filename %d: %w", i, err)
+			}
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 			base := strings.TrimSuffix(name, filepath.Ext(name))
 			es[i] = LE{o, s, base, 0, ext, f}
@@ -363,12 +366,16 @@ func cmdPatch(op, pd, out string, ko, so int) error {
 		binary.LittleEndian.PutUint32(b[:], uint32(len(d))^xk)
 		lf.Write(b[:])
 		if f == lstMoon {
+			raw, err := u2s(fn)
+			if err != nil {
+				return fmt.Errorf("encode MOON filename %q: %w", fn, err)
+			}
+			if len(raw) > moonFnSz {
+				return fmt.Errorf("MOON filename too long (%d > %d bytes): %s", len(raw), moonFnSz, fn)
+			}
 			nb := make([]byte, moonFnSz)
-			raw := []byte(fn)
 			for i, v := range raw {
-				if i < moonFnSz {
-					nb[i] = v ^ ik
-				}
+				nb[i] = v ^ ik
 			}
 			lf.Write(nb)
 		} else {
@@ -499,10 +506,32 @@ func cjk(s string) bool {
 }
 
 func cmdSNX2TXT(sp, op string) error {
-	d, _ := os.ReadFile(sp)
+	d, readErr := os.ReadFile(sp)
+	if readErr != nil {
+		return readErr
+	}
 	_, _, _, entries, err := pSNX(d)
 	if err != nil {
-		return err
+		// MOON. DVD predates the fixed-header LCSE format. Its bytecode is
+		// variable-length and ends with opcode FF, so try the dedicated
+		// disassembler before reporting the LCSE parse failure.
+		if moonInstructions, moonErr := parseMoonOldSNX(d); moonErr == nil {
+			_ = moonInstructions
+			return cmdMoonOldSNX2TXTData(sp, op, d)
+		}
+		// Patched English archives can contain both newly appended plain SNX
+		// and untouched Japanese SNX still XORed with AA. Decode per file so a
+		// mixed archive remains fully inspectable.
+		decoded := xB(d, 0xAA)
+		if moonInstructions, moonErr := parseMoonOldSNX(decoded); moonErr == nil {
+			_ = moonInstructions
+			fmt.Printf("[INFO] %s: detected MOON XOR key AA\n", filepath.Base(sp))
+			return cmdMoonOldSNX2TXTData(sp, op, decoded)
+		}
+		return fmt.Errorf("unsupported SNX (LCSE: %v; MOON: %v)", err, func() error {
+			_, moonErr := parseMoonOldSNX(d)
+			return moonErr
+		}())
 	}
 	if op == "" {
 		op = strings.TrimSuffix(sp, filepath.Ext(sp)) + ".txt"
@@ -677,9 +706,22 @@ func cmdSNX2TXTBatch(d, od string) error {
 	if len(m) == 0 {
 		return fmt.Errorf("no SNX")
 	}
+	done := 0
+	var failures []string
 	for _, f := range m {
 		b := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
-		cmdSNX2TXT(f, filepath.Join(od, b+".txt"))
+		if err := cmdSNX2TXT(f, filepath.Join(od, b+".txt")); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", filepath.Base(f), err))
+			fmt.Printf("[SKIP] %s: %v\n", filepath.Base(f), err)
+			continue
+		}
+		done++
+	}
+	if done == 0 {
+		return fmt.Errorf("0/%d SNX converted: %s", len(m), strings.Join(failures, "; "))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d/%d SNX converted; %d failed", done, len(m), len(failures))
 	}
 	return nil
 }
@@ -707,11 +749,11 @@ func cmdTXT2SNXBatch(td, sd, od string) error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `lcse-tool v0.8 - LC-ScriptEngine
+	fmt.Fprintf(os.Stderr, `lcse-tool v1.2 - LC-ScriptEngine / MOON
 
 Supporte les accents francais via encodage single-byte (0xA1-0xAD).
 Les fichiers texte UTF-8 avec accents sont automatiquement detectes.
-Utiliser lcse_hook.dll + lcse_launcher.exe pour le rendu dans le jeu.
+Utiliser lcse_hook.dll + lcse_launcher.exe (ONE) ou moon_launcher.exe (MOON).
 
 ARCHIVE:
   lcse-tool unpack <lcsebody> [output_dir]
@@ -722,6 +764,7 @@ SCRIPTS:
   lcse-tool snx2txt <file.snx|dir> [output]
   lcse-tool txt2snx <text.txt> <original.snx> [output.snx]
   lcse-tool txt2snx-batch <txt_dir> <snx_dir> [output_dir]
+  lcse-tool moon-accents <file.snx|dir> <output>
 
 OPTIONS:  --key <hex>  --snxkey <hex>
 `)
@@ -817,6 +860,12 @@ func main() {
 			o = ca[2]
 		}
 		err = cmdTXT2SNXBatch(ca[0], ca[1], o)
+	case "moon-accents":
+		if len(ca) < 2 {
+			usage()
+			os.Exit(1)
+		}
+		err = cmdMoonAccents(ca[0], ca[1])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown: %s\n", cmd)
 		os.Exit(1)

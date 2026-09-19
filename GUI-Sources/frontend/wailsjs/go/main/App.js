@@ -22,6 +22,10 @@ export function GetToolPaths() {
   return window['go']['main']['App']['GetToolPaths']();
 }
 
+export function InstallMoonHook(arg1, arg2, arg3) {
+  return window['go']['main']['App']['InstallMoonHook'](arg1, arg2, arg3);
+}
+
 export function InstallOneHook(arg1, arg2, arg3) {
   return window['go']['main']['App']['InstallOneHook'](arg1, arg2, arg3);
 }

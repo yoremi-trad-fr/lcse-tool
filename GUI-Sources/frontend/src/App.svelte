@@ -31,7 +31,8 @@
     OneImportDialogues,
     GetOneHookConfig,
     SaveOneHookConfig,
-    InstallOneHook
+    InstallOneHook,
+    InstallMoonHook
   } from '../wailsjs/go/main/App.js';
 
   let selectedOp = 'prepare';
@@ -82,6 +83,7 @@
   let hookFontName = 'MS Gothic';
   let hookDebugLog = '0';
   let hookGameDir = '';
+  let hookGame = 'one';
 
   const operations = [
     { id: '_flow', label: 'Workflow', section: true },
@@ -91,7 +93,7 @@
     { id: 'snx', label: 'SNX <-> TXT' },
     { id: 'images', label: 'TGF <-> PNG' },
     { id: 'rebuild', label: 'Rebuild archive' },
-    { id: 'hook', label: 'Hook ONE' },
+    { id: 'hook', label: 'Hook accents' },
     { id: '_info', label: '', section: true },
     { id: 'about', label: 'À propos' }
   ];
@@ -153,7 +155,7 @@
     if (toolPaths.moonAsm) addLine('moon_asm: ' + toolPaths.moonAsm);
     if (toolPaths.moonTGF) addLine('moon_extractTGF: ' + toolPaths.moonTGF);
     if (toolPaths.moonScripts) addLine('sources MOON: ' + toolPaths.moonScripts);
-    if (hookDir) addLine('hook ONE: ' + hookDir);
+    if (hookDir) addLine('hook accents: ' + hookDir);
     addLine('Prêt.');
   });
 
@@ -304,7 +306,8 @@
   }
 
   function installHook() {
-    run(() => InstallOneHook(hookGameDir, hookFontName, hookDebugLog));
+    if (hookGame === 'moon') run(() => InstallMoonHook(hookGameDir, hookFontName, hookDebugLog));
+    else run(() => InstallOneHook(hookGameDir, hookFontName, hookDebugLog));
   }
 </script>
 
@@ -425,6 +428,13 @@
             <label class="check inline"><input type="checkbox" bind:checked={snxBatch} /> Batch</label>
           </div>
 
+          {#if snxGame === 'moon' && snxDirection === 's2t'}
+            <p class="notice">
+              Les anciens SNX de MOON sont désassemblés directement en scripts UTF-8. L’archive anglaise mixte est prise en
+              charge, y compris ses fichiers japonais résiduels chiffrés ; les six anciens scripts non scindés sont exclus lors du rebuild.
+            </p>
+          {/if}
+
           <div class="form-grid">
             <label>{snxDirection === 's2t' ? (snxBatch ? 'Dossier SNX' : 'Fichier SNX') : (snxBatch ? 'Dossier TXT' : 'Fichier TXT')}</label>
             <div class="row"><input bind:value={snxInput} readonly /><button on:click={chooseSNXInput}>Parcourir</button></div>
@@ -527,9 +537,15 @@
 
       {:else if selectedOp === 'hook'}
         <section class="form-view">
-          <h1>Hook ONE</h1>
+          <h1>Hook accents ONE / MOON</h1>
           <div class="block full">
             <div class="form-grid">
+              <label>Jeu</label>
+              <select bind:value={hookGame}>
+                <option value="one">ONE</option>
+                <option value="moon">MOON (archive anglaise)</option>
+              </select>
+
               <label>Kit</label>
               <input value={hookDir || 'bin/one_hook'} readonly />
 
@@ -544,7 +560,7 @@
               </select>
 
               <label>Dossier jeu</label>
-              <div class="row"><input bind:value={hookGameDir} readonly /><button on:click={() => pickDir('Dossier du jeu ONE', (v) => hookGameDir = v)}>Parcourir</button></div>
+              <div class="row"><input bind:value={hookGameDir} readonly /><button on:click={() => pickDir(`Dossier du jeu ${hookGame === 'moon' ? 'MOON' : 'ONE'}`, (v) => hookGameDir = v)}>Parcourir</button></div>
             </div>
             <div class="actions">
               <button on:click={reloadHookConfig} disabled={running}>Recharger</button>
@@ -559,7 +575,7 @@
           <img src={logo} alt="" />
           <h1>LCSE Tool GUI</h1>
           <p>Interface Wails/Svelte pour les workflows Nexton ONE et MOON.</p>
-          <span>v1</span>
+          <span>v1.2</span>
         </section>
       {/if}
     </main>

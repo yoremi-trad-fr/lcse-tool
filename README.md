@@ -1,7 +1,8 @@
-# lcse-tools v0.8
+# lcse-tools v1.2
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
-Développé pour la traduction française de **One ~Kagayaku Kisetsu e~ Vista (2007)**.
+Développé pour les traductions françaises de **One ~Kagayaku Kisetsu e~ Vista
+(2007)** et **MOON. DVD**.
 
 ## Contenu
 
@@ -10,7 +11,8 @@ lcse-tool.exe            Outil principal (Windows x86)
 lcse-tool                Outil principal (Linux x64)
 Extract.py               Extraire les dialogues pour traduction
 Reinject.py              Réinjecter les dialogues traduits
-Hook/lcse_launcher.exe   Lanceur du jeu (injection DLL)
+Hook/lcse_launcher.exe   Lanceur ONE (injection DLL)
+Hook/moon_launcher.exe   Lanceur MOON (injection DLL)
 Hook/lcse_hook.dll       Hook GDI (accents + police)
 Hook/lcse_hook.ini       Configuration
 Hook/lcse_font.ttf       Police custom (optionnel)
@@ -24,10 +26,10 @@ Elle détecte `lcse-tool.exe` à côté du binaire, dans le dossier du dépôt, 
 sélection manuelle depuis la barre du haut.
 Elle embarque aussi un dossier `GUI-Sources/bin/` pour les outils wrapper
 utilisés par les workflows ONE/MOON (`lcse-tool.exe`, `moon_asm.exe`,
-`moon_extractTGF.exe`, etc.). Pour MOON, `bin/moon_scripts/` contient les
-sources assembleur du kit, utilisees par l'onglet **SNX <-> TXT** en mode MOON.
-Le kit hook ONE est place dans `bin/one_hook/` et peut etre installe/configure
-depuis l'onglet **Hook ONE**.
+`moon_extractTGF.exe`, etc.). Les SNX MOON sont désormais désassemblés
+directement : le dossier de sources du MOON Kit n'est plus requis. Le kit hook
+est placé dans `bin/one_hook/` et peut être installé pour ONE ou MOON depuis
+l'onglet **Hook accents**.
 
 Organisation de la GUI :
 - **Preparation** : extraction ONE/MOON et generation des TXT.
@@ -35,7 +37,7 @@ Organisation de la GUI :
 - **SNX <-> TXT** : conversion dans les deux sens, fichier ou batch.
 - **TGF <-> PNG** : extraction/conversion des images MOON vers PNG.
 - **Rebuild archive** : patch/pack d'archives sans mention de langue cible.
-- **Hook ONE** : edition de `lcse_hook.ini` et installation du kit.
+- **Hook accents** : édition de `lcse_hook.ini` et installation pour ONE/MOON.
 
 ```bash
 cd GUI-Sources
@@ -68,6 +70,7 @@ Pour les CG modifiés, les placer dans le dossier `patched/` avant la commande f
 | `lcse-tool snx2txt <file.snx\|dir> [output]` | SNX → TXT (UTF-8 BOM) |
 | `lcse-tool txt2snx <text.txt> <orig.snx> [out]` | TXT → SNX |
 | `lcse-tool txt2snx-batch <txt/> <snx/> [out/]` | Batch TXT → SNX |
+| `lcse-tool moon-accents <snx\|dir> <out>` | Finaliser les accents après `moon_asm` |
 
 Options : `--key <hex>` et `--snxkey <hex>` pour forcer les clés XOR.
 
@@ -76,21 +79,44 @@ Options : `--key <hex>` et `--snxkey <hex>` pour forcer les clés XOR.
 `unpack` et `patch` détectent aussi le format LST ancien de **MOON.**
 (`moon_jp`, `moon_eng`) : entrées de 44 octets, noms de fichiers avec extension
 incluse, clé LST `0xCC`, SNX chiffrés `0xAA` pour `moon_jp` ou en clair pour
-`moon_eng`.
+`moon_eng`. Les noms du LST sont décodés depuis le CP932/Shift-JIS vers Unicode
+à l'extraction, puis réencodés en Shift-JIS lors d'un rebuild afin de préserver
+les éventuels noms japonais sous Windows.
 
 ```bash
 lcse-tool unpack MOON/moon_eng MOON/_tool_extract_eng
 lcse-tool patch MOON/moon_eng MOON/_tool_extract_eng MOON/moon_fr
 ```
 
-Note : les `.SNX` de MOON. sont un format plus ancien que ceux de One/LCSE
-Vista ; `snx2txt`/`txt2snx` ne s'appliquent pas à ces scripts.
-Dans la GUI, utiliser **SNX <-> TXT** avec le jeu **MOON** pour generer les
-scripts TXT traduisibles, puis assembler les TXT modifies en SNX.
+Les `.SNX` de MOON. utilisent un bytecode variable plus ancien que celui de
+ONE Vista. Depuis la v1.2, `snx2txt` le détecte et le désassemble directement
+en UTF-8, y compris dans l'archive anglaise mixte où certains SNX japonais
+restent chiffrés par XOR `0xAA`.
+
+La chaîne japonaise de 119 SNX est également prise en charge. `INIT.snx`
+contient 93 octets orphelins après son premier `EOF` ; ils sont signalés puis
+ignorés, conformément au résultat fourni par le MOON Kit officiel. La GUI
+protège aussi les kanji dont le second octet Shift-JIS est `0x5C`, un cas que
+`moon_asm.exe` interprète sinon comme un antislash.
+
+L'archive anglaise contient 131 SNX : 125 scripts actifs et les 6 anciens
+scripts japonais non scindés (`DAY01`, `DAY02`, `DAY03`, `DAY07T`, `DAY08`,
+`DAY20`). La GUI conserve les 131 à l'extraction pour l'audit mais exclut
+automatiquement ces 6 résidus du rebuild lorsque leurs variantes A/B existent.
+
+Le [MOON Kit](https://asceai.net/moonkit/) reste la source de `moon_asm.exe`.
+Dans la GUI, le workflow MOON est : extraction de l'archive, désassemblage SNX
+vers TXT UTF-8, export/import des seuls dialogues, assemblage en SNX, puis
+rebuild de l'archive. Les coupures `\n` lues dans un SNX sont traitées comme
+des coupures de mise en page ; `moon_asm.exe` les recalcule lors du rebuild.
+Le plus gros script japonais reconstruit est à seulement 755 octets de la
+limite de 64 Kio. On peut donc traduire depuis les textes japonais, mais il est
+plus prudent de réinjecter dans la structure anglaise déjà scindée si la
+traduction française devient plus volumineuse.
 
 ## Système d'accents français
 
-Le moteur LCSE ne supporte que le Shift-JIS. Les caractères accentués français
+Les moteurs ONE/MOON ne supportent que le Shift-JIS. Les caractères accentués français
 sont encodés dans la plage single-byte half-width katakana (0xA1-0xAD) par
 `lcse-tool`, puis interceptés au rendu par `lcse_hook.dll` qui substitue les
 vrais glyphes Unicode.
@@ -128,9 +154,9 @@ v0.7) produisait un espacement de 24px pour un glyphe de ~12px de large.
 
 ## Hook DLL — Architecture technique
 
-Le lanceur (`lcse_launcher.exe`) crée `lcsebody.exe` en mode suspendu, injecte
-`lcse_hook.dll` via `CreateRemoteThread` + `LoadLibraryA`, puis reprend
-l'exécution.
+Le lanceur ONE (`lcse_launcher.exe`) ou MOON (`moon_launcher.exe`) crée
+l'exécutable cible en mode suspendu, injecte `lcse_hook.dll` via
+`CreateRemoteThread` + `LoadLibraryA`, puis reprend l'exécution.
 
 ### Hooks IAT
 
@@ -195,6 +221,17 @@ modification pour éviter toute corruption.
 
 
 ## Historique des versions
+
+### v1.2 — Chaîne MOON complète
+- Désassemblage direct du bytecode SNX ancien, en clair ou XOR `0xAA`
+- Validation extraction → TXT → dialogues → import → assemblage sur l'archive anglaise
+- Détection des 6 scripts japonais résiduels et rebuild des 125 scripts actifs
+- Accents français UTF-8 finalisés après `moon_asm.exe`
+- Lanceur/hook d'accents installable pour `MOON_eng.EXE`
+
+### v1.1 — Workflow MOON initial
+- Extraction/patch des archives anciennes et conservation des noms Shift-JIS
+- Assemblage à partir des sources pré-désassemblées du MOON Kit
 
 ### v0.8 — Accents single-byte + hook GetGlyphOutlineA
 - Accents encodés en single-byte (0xA1-0xAD) au lieu de double-byte (F040-F04C)
