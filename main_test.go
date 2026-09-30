@@ -70,10 +70,17 @@ func TestMoonPatchPreservesShiftJISFilename(t *testing.T) {
 	if err := os.WriteFile(archive+".lst", lstData, 0644); err != nil {
 		t.Fatal(err)
 	}
+	patches := filepath.Join(root, "empty_patch")
+	if err := os.Mkdir(patches, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	output := filepath.Join(root, "moon_rebuilt")
-	if err := cmdPatch(archive, filepath.Join(root, "empty_patch"), output, -1, -1); err != nil {
+	if err := cmdPatch(archive, patches, output, -1, -1); err != nil {
 		t.Fatal(err)
+	}
+	if rebuiltArchive, err := os.ReadFile(output); err != nil || string(rebuiltArchive) != "test" {
+		t.Fatalf("unpatched resource changed: %q, %v", rebuiltArchive, err)
 	}
 	entries, err := pLST(output+".lst", key, lstMoon)
 	if err != nil {
@@ -81,6 +88,33 @@ func TestMoonPatchPreservesShiftJISFilename(t *testing.T) {
 	}
 	if got := entries[0].FN(); got != normalizedFilename {
 		t.Fatalf("expected rebuilt name %q, got %q", normalizedFilename, got)
+	}
+	rebuiltIndex, err := os.ReadFile(output + ".lst")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rebuiltIndex[12:12+moonFnSz], lstData[12:12+moonFnSz]) {
+		t.Fatal("MOON patch changed the original filename bytes")
+	}
+}
+
+func TestMoonPatchRejectsInPlaceOutput(t *testing.T) {
+	root := t.TempDir()
+	archive := filepath.Join(root, "moon")
+	if err := os.WriteFile(archive, []byte("original archive"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive+".lst", []byte("original index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdPatch(archive, root, archive, -1, -1); err == nil {
+		t.Fatal("expected in-place patch to be rejected")
+	}
+	for path, want := range map[string]string{archive: "original archive", archive + ".lst": "original index"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("in-place rejection modified %s: %q, %v", path, got, err)
+		}
 	}
 }
 

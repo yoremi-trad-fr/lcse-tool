@@ -20,8 +20,16 @@ française de ONE et MOON.
   les lignes `SETSTATUS` et `TEXT`, puis d'assembler les SNX avec `moon_asm.exe`.
   Les six anciens scripts japonais non scindés de l'archive anglaise sont
   conservés pour l'audit mais exclus automatiquement du rebuild.
-- L'onglet **Hook accents** installe le lanceur et la DLL pour ONE ou
-  `MOON_eng.EXE`.
+- L'écran **Images MOON -> PNG** accepte une archive MOON avec son `.lst`, un
+  dossier ou un fichier TGF/BMP. Les TGF compressés passent par
+  `moon_extractTGF.exe` ; les BMP bruts sont convertis directement. Les PNG
+  sont écrits dans le dossier choisi, sans modifier les images source.
+- Pour **Rebuild archive**, choisir un autre chemin de sortie que l'archive
+  source. Le patch ne remplace que les fichiers de même nom et extension ; un
+  PNG ne remplace pas une entrée BMP. Les fichiers ignorés sont signalés.
+- L'onglet **Hook accents** installe le lanceur et la DLL pour ONE. Pour MOON,
+  il crée `MOON_fr.exe`, qui lance le véritable `MOON_eng.EXE` sans le
+  renommer afin que le moteur continue de charger l'archive `moon_eng`.
 
 ## Développement
 

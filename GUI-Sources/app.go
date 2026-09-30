@@ -16,7 +16,6 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"golang.org/x/image/bmp"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 
@@ -547,20 +546,27 @@ func (a *App) InstallMoonHook(gameDir, fontName, debugLog string) string {
 		return "ERROR"
 	}
 	a.logSection("INSTALL HOOK MOON")
-	files := []string{"moon_launcher.exe", "lcse_hook.dll", "lcse_hook.ini"}
-	for _, name := range files {
-		src := filepath.Join(a.oneHookDir, name)
+	files := []struct {
+		source string
+		target string
+	}{
+		{source: "moon_launcher.exe", target: "MOON_fr.exe"},
+		{source: "lcse_hook.dll", target: "lcse_hook.dll"},
+		{source: "lcse_hook.ini", target: "lcse_hook.ini"},
+	}
+	for _, file := range files {
+		src := filepath.Join(a.oneHookDir, file.source)
 		if !fileExists(src) {
-			a.logError(fmt.Sprintf("%s introuvable dans le kit hook.", name))
+			a.logError(fmt.Sprintf("%s introuvable dans le kit hook.", file.source))
 			return "ERROR"
 		}
-		if err := copyFile(src, filepath.Join(gameDir, name)); err != nil {
+		if err := copyFile(src, filepath.Join(gameDir, file.target)); err != nil {
 			a.logError(err.Error())
 			return "ERROR"
 		}
-		a.log(fmt.Sprintf("%s -> %s", name, gameDir))
+		a.log(fmt.Sprintf("%s -> %s", file.target, gameDir))
 	}
-	a.logOK("Kit hook MOON installe. Lance le jeu avec moon_launcher.exe.")
+	a.logOK("Kit hook MOON installe. Lance MOON_fr.exe ; MOON_eng.EXE reste le vrai executable du moteur.")
 	return "OK"
 }
 
@@ -579,63 +585,22 @@ func (a *App) MoonUnpackArchive(archiveBase, outputDir string) string {
 
 func (a *App) MoonConvertImages(inputPath, outputDir string) BatchResult {
 	if inputPath == "" || outputDir == "" {
-		a.logError("Source TGF/BMP et dossier PNG requis.")
+		a.logError("Source MOON et dossier PNG requis.")
 		return BatchResult{Status: "ERROR", Detail: "Parametres manquants"}
 	}
-	a.logSection("MOON TGF/BMP -> PNG")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		a.logError(err.Error())
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-
-	files := []string{}
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		a.logError(err.Error())
 		return BatchResult{Status: "ERROR", Detail: err.Error()}
 	}
-	baseRoot := filepath.Dir(inputPath)
-	if info.IsDir() {
-		baseRoot = inputPath
-		err = filepath.WalkDir(inputPath, func(path string, d os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if d.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext == ".tgf" || ext == ".bmp" {
-				files = append(files, path)
-			}
-			return nil
-		})
-		if err != nil {
-			a.logError(err.Error())
-			return BatchResult{Status: "ERROR", Detail: err.Error()}
-		}
-	} else {
-		files = append(files, inputPath)
-	}
-
-	converted, skipped := 0, 0
-	for _, file := range files {
-		rel, _ := filepath.Rel(baseRoot, file)
-		outRel := strings.TrimSuffix(rel, filepath.Ext(rel)) + ".png"
-		outPath := filepath.Join(outputDir, outRel)
-		if err := convertMoonImageToPNG(file, outPath); err != nil {
-			a.log(fmt.Sprintf("[SKIP] %s: %v", filepath.Base(file), err))
-			skipped++
-			continue
-		}
-		converted++
-		if converted <= 25 || converted%100 == 0 {
-			a.log(fmt.Sprintf("[%d] %s -> %s", converted, filepath.Base(file), outRel))
+	if !info.IsDir() {
+		ext := strings.ToLower(filepath.Ext(inputPath))
+		if ext != ".tgf" && ext != ".bmp" {
+			return a.MoonExtractImagesFromArchive(inputPath, outputDir)
 		}
 	}
-	msg := fmt.Sprintf("%d images converties, %d ignorees", converted, skipped)
-	a.logOK(msg)
-	return BatchResult{Status: "OK", Detail: msg}
+	a.logSection("MOON IMAGES -> PNG")
+	return a.convertMoonImageFiles(inputPath, outputDir)
 }
 
 func (a *App) MoonExtractImagesFromArchive(archiveBase, outputDir string) BatchResult {
@@ -643,69 +608,23 @@ func (a *App) MoonExtractImagesFromArchive(archiveBase, outputDir string) BatchR
 		a.logError("Archive MOON et dossier PNG requis.")
 		return BatchResult{Status: "ERROR", Detail: "Parametres manquants"}
 	}
-	if a.moonTGF == "" {
-		a.moonTGF = a.findTool([]string{"moon_extractTGF.exe", "moon_extractTGF"})
-	}
-	if a.moonTGF == "" {
-		a.logError("moon_extractTGF.exe introuvable dans bin/.")
-		return BatchResult{Status: "ERROR", Detail: "moon_extractTGF.exe introuvable"}
-	}
 	if !fileExists(archiveBase) || !fileExists(archiveBase+".lst") {
 		a.logError("Archive MOON ou fichier .lst introuvable.")
 		return BatchResult{Status: "ERROR", Detail: "Archive invalide"}
 	}
 
 	a.logSection("MOON ARCHIVE -> PNG")
-	tmp, err := os.MkdirTemp("", "lcse-moon-tgf-*")
+	tmp, err := os.MkdirTemp("", "lcse-moon-images-*")
 	if err != nil {
 		a.logError(err.Error())
 		return BatchResult{Status: "ERROR", Detail: err.Error()}
 	}
 	defer os.RemoveAll(tmp)
-
-	if err := copyFile(archiveBase, filepath.Join(tmp, "moon")); err != nil {
-		a.logError(err.Error())
+	unpacked := filepath.Join(tmp, "unpacked")
+	if err := a.runLCSE("unpack", archiveBase, unpacked); err != nil {
 		return BatchResult{Status: "ERROR", Detail: err.Error()}
 	}
-	if err := copyFile(archiveBase+".lst", filepath.Join(tmp, "moon.lst")); err != nil {
-		a.logError(err.Error())
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-	tgfOut := filepath.Join(tmp, "TGF")
-	if err := os.MkdirAll(tgfOut, 0755); err != nil {
-		a.logError(err.Error())
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-	if err := a.runExecutable(a.moonTGF, tmp); err != nil {
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		a.logError(err.Error())
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-
-	bmpFiles, err := filepath.Glob(filepath.Join(tgfOut, "*.BMP"))
-	if err != nil {
-		a.logError(err.Error())
-		return BatchResult{Status: "ERROR", Detail: err.Error()}
-	}
-	converted, skipped := 0, 0
-	for _, bmpFile := range bmpFiles {
-		base := strings.TrimSuffix(filepath.Base(bmpFile), filepath.Ext(bmpFile))
-		out := filepath.Join(outputDir, base+".png")
-		if err := convertMoonImageToPNG(bmpFile, out); err != nil {
-			a.log(fmt.Sprintf("[SKIP] %s: %v", filepath.Base(bmpFile), err))
-			skipped++
-			continue
-		}
-		converted++
-		if converted <= 25 || converted%100 == 0 {
-			a.log(fmt.Sprintf("[%d] %s -> %s.png", converted, filepath.Base(bmpFile), base))
-		}
-	}
-	msg := fmt.Sprintf("%d PNG crees, %d ignores", converted, skipped)
-	a.logOK(msg)
-	return BatchResult{Status: "OK", Detail: msg}
+	return a.convertMoonImageFiles(unpacked, outputDir)
 }
 
 func (a *App) MoonScriptsToUTF(inputDir, outputDir string) BatchResult {
@@ -987,6 +906,17 @@ func (a *App) MoonImportDialogues(scriptsDir, dialoguesDir, outputDir string) Ba
 		a.logError(err.Error())
 		return BatchResult{Status: "ERROR", Detail: err.Error()}
 	}
+	activeScripts, err := moonActiveTxtFiles(scriptsDir)
+	if err != nil {
+		a.logError(err.Error())
+		return BatchResult{Status: "ERROR", Detail: err.Error()}
+	}
+	for _, source := range activeScripts {
+		if err := copyFile(source, filepath.Join(outputDir, filepath.Base(source))); err != nil {
+			a.logError(err.Error())
+			return BatchResult{Status: "ERROR", Detail: err.Error()}
+		}
+	}
 	dialogueFiles, err := filepath.Glob(filepath.Join(dialoguesDir, "*.dlg.txt"))
 	if err != nil {
 		a.logError(err.Error())
@@ -1012,7 +942,7 @@ func (a *App) MoonImportDialogues(scriptsDir, dialoguesDir, outputDir string) Ba
 		total += count
 		done++
 	}
-	msg := fmt.Sprintf("%d fichiers, %d lignes importees, %d ignores", done, total, skipped)
+	msg := fmt.Sprintf("%d scripts complets, %d fichiers dialogues, %d lignes importees, %d ignores", len(activeScripts), done, total, skipped)
 	a.logOK(msg)
 	return BatchResult{Status: "OK", Detail: msg}
 }
@@ -1463,20 +1393,12 @@ func normalizeNewlines(s string) string {
 	return strings.ReplaceAll(s, "\n", "\r\n")
 }
 
-func convertMoonImageToPNG(inputPath, outputPath string) error {
+func convertMoonBMPToPNG(inputPath, outputPath string) error {
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return err
 	}
-	ext := strings.ToLower(filepath.Ext(inputPath))
-	if ext == ".tgf" {
-		idx := bytes.Index(data, []byte{'B', 'M'})
-		if idx < 0 {
-			return fmt.Errorf("BMP embarque introuvable")
-		}
-		data = data[idx:]
-	}
-	img, err := bmp.Decode(bytes.NewReader(data))
+	img, err := decodeMoonBMP(data)
 	if err != nil {
 		return err
 	}
@@ -1565,11 +1487,38 @@ func importMoonDialogueFile(scriptFile, dialogueFile, outputFile string) (int, e
 		if tag == "TEXT" {
 			lines[i] = prefix + "TEXT " + replacement.Text
 		} else {
-			lines[i] = prefix + "SETSTATUS '" + strings.ReplaceAll(replacement.Text, "'", "\\'") + "'"
+			trimmed := strings.TrimLeft(line, " \t")
+			rest := strings.TrimPrefix(trimmed, "SETSTATUS ")
+			start := strings.Index(rest, "'")
+			end := strings.LastIndex(rest, "'")
+			if start < 0 || end <= start {
+				continue
+			}
+			beforeValue := prefix + "SETSTATUS " + rest[:start+1]
+			afterValue := rest[end:]
+			lines[i] = beforeValue + escapeMoonQuotedValue(replacement.Text) + afterValue
 		}
 		changed++
 	}
 	return changed, writeUTF8BOM(outputFile, normalizeNewlines(strings.Join(lines, "\n")))
+}
+
+func escapeMoonQuotedValue(value string) string {
+	var out strings.Builder
+	out.Grow(len(value))
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' && index+1 < len(value) && value[index+1] == '\'' {
+			out.WriteString("\\'")
+			index++
+			continue
+		}
+		if value[index] == '\'' {
+			out.WriteString("\\'")
+			continue
+		}
+		out.WriteByte(value[index])
+	}
+	return out.String()
 }
 
 func exportOneDialogueFile(scriptFile, outputDir string) (int, error) {

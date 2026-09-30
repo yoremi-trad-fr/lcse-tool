@@ -1,4 +1,4 @@
-# lcse-tools v1.2
+# lcse-tools v1.3
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
 Développé pour les traductions françaises de **One ~Kagayaku Kisetsu e~ Vista
@@ -35,7 +35,8 @@ Organisation de la GUI :
 - **Preparation** : extraction ONE/MOON et generation des TXT.
 - **Import/export dialogues** : fichiers `.dlg.txt` pour ONE/MOON.
 - **SNX <-> TXT** : conversion dans les deux sens, fichier ou batch.
-- **TGF <-> PNG** : extraction/conversion des images MOON vers PNG.
+- **Images MOON -> PNG** : conversion depuis une archive MOON, un dossier ou un
+  fichier TGF/BMP, avec prise en charge des BMP bruts présents dans l'archive.
 - **Rebuild archive** : patch/pack d'archives sans mention de langue cible.
 - **Hook accents** : édition de `lcse_hook.ini` et installation pour ONE/MOON.
 
@@ -58,6 +59,12 @@ lcse-tool txt2snx-batch scripts/ extracted/ patched/
 lcse-tool patch lcsebody1 patched/ lcsebody1_fr
 ```
 Pour les CG modifiés, les placer dans le dossier `patched/` avant la commande finale.
+
+La sortie de `patch` doit avoir un autre chemin que l'archive source ; l'outil
+refuse de l'écraser. Seuls les fichiers dont le nom **et l'extension**
+correspondent à une entrée existante sont remplacés. Par exemple, pour modifier
+`ATTWIN_LOAD.BMP`, fournir `ATTWIN_LOAD.bmp` : un PNG homonyme est ignoré et
+signalé dans le journal.
 
 
 ## Commandes
@@ -221,6 +228,12 @@ modification pour éviter toute corruption.
 
 
 ## Historique des versions
+
+### v1.3 — Images MOON et reconstruction d'archive sécurisée
+- Conversion des TGF et BMP MOON vers PNG depuis une archive, un dossier ou un fichier.
+- Refus de reconstruire une archive sur elle-même ; erreurs de lecture et d'écriture remontées.
+- Noms de l'index MOON conservés exactement, y compris la casse des extensions.
+- Fichiers de patch sans entrée correspondante signalés dans le journal.
 
 ### v1.2 — Chaîne MOON complète
 - Désassemblage direct du bytecode SNX ancien, en clair ou XOR `0xAA`

@@ -323,61 +323,107 @@ func cmdUnpack(pp, od string, ko, so int) error {
 	return nil
 }
 func cmdPatch(op, pd, out string, ko, so int) error {
+	// Creating the output over the input truncates resources that are not patched.
+	if filepath.Clean(op) == filepath.Clean(out) {
+		return fmt.Errorf("archive source et sortie identiques: %s", op)
+	}
+	if sourceInfo, err := os.Stat(op); err == nil {
+		if outputInfo, err := os.Stat(out); err == nil && os.SameFile(sourceInfo, outputInfo) {
+			return fmt.Errorf("archive source et sortie identiques: %s", op)
+		}
+	}
 	ik, sk, f, es, e := openLSTArchive(op, ko, so)
 	if e != nil {
 		return e
 	}
-	pf, _ := os.Open(op)
+	var originalMoonLST []byte
+	if f == lstMoon {
+		originalMoonLST, e = os.ReadFile(op + ".lst")
+		if e != nil {
+			return e
+		}
+	}
+	pf, e := os.Open(op)
+	if e != nil {
+		return e
+	}
 	defer pf.Close()
 	rp := map[string]string{}
-	filepath.Walk(pd, func(p string, i os.FileInfo, e error) error {
+	if e := filepath.Walk(pd, func(p string, i os.FileInfo, e error) error {
 		if e != nil || i.IsDir() {
 			return e
 		}
 		rp[strings.ToUpper(filepath.Base(p))] = p
 		return nil
-	})
-	of, _ := os.Create(out)
+	}); e != nil {
+		return e
+	}
+	of, e := os.Create(out)
+	if e != nil {
+		return e
+	}
 	defer of.Close()
-	lf, _ := os.Create(out + ".lst")
+	lf, e := os.Create(out + ".lst")
+	if e != nil {
+		return e
+	}
 	defer lf.Close()
+	writeIndex := func(data []byte) error {
+		written, err := lf.Write(data)
+		if err != nil {
+			return err
+		}
+		if written != len(data) {
+			return io.ErrShortWrite
+		}
+		return nil
+	}
 	xk := exK(ik)
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], uint32(len(es))^xk)
-	lf.Write(b[:])
+	if e := writeIndex(b[:]); e != nil {
+		return e
+	}
 	pc := 0
-	for _, en := range es {
+	used := map[string]bool{}
+	for index, en := range es {
 		fn := en.FN()
 		var d []byte
 		if r, ok := rp[strings.ToUpper(fn)]; ok {
-			d, _ = os.ReadFile(r)
+			d, e = os.ReadFile(r)
+			if e != nil {
+				return e
+			}
 			if strings.ToLower(en.E) == "snx" {
 				d = xB(d, sk)
 			}
 			fmt.Printf("[PATCH] %s\n", fn)
 			pc++
+			used[strings.ToUpper(fn)] = true
 		} else {
 			d = make([]byte, en.S)
-			pf.ReadAt(d, int64(en.O))
+			if _, e := pf.ReadAt(d, int64(en.O)); e != nil {
+				return fmt.Errorf("lire %s depuis l'archive source: %w", fn, e)
+			}
 		}
-		po, _ := of.Seek(0, io.SeekCurrent)
+		po, e := of.Seek(0, io.SeekCurrent)
+		if e != nil {
+			return e
+		}
 		binary.LittleEndian.PutUint32(b[:], uint32(po)^xk)
-		lf.Write(b[:])
+		if e := writeIndex(b[:]); e != nil {
+			return e
+		}
 		binary.LittleEndian.PutUint32(b[:], uint32(len(d))^xk)
-		lf.Write(b[:])
+		if e := writeIndex(b[:]); e != nil {
+			return e
+		}
 		if f == lstMoon {
-			raw, err := u2s(fn)
-			if err != nil {
-				return fmt.Errorf("encode MOON filename %q: %w", fn, err)
+			// Preserve the exact indexed filename, including extension case.
+			nameOffset := 4 + index*moonLstESz + 8
+			if e := writeIndex(originalMoonLST[nameOffset : nameOffset+moonFnSz]); e != nil {
+				return e
 			}
-			if len(raw) > moonFnSz {
-				return fmt.Errorf("MOON filename too long (%d > %d bytes): %s", len(raw), moonFnSz, fn)
-			}
-			nb := make([]byte, moonFnSz)
-			for i, v := range raw {
-				nb[i] = v ^ ik
-			}
-			lf.Write(nb)
 		} else {
 			sn, _ := u2s(en.N)
 			if sn == nil {
@@ -389,11 +435,31 @@ func cmdPatch(op, pd, out string, ko, so int) error {
 					nb[i] = v ^ ik
 				}
 			}
-			lf.Write(nb)
+			if e := writeIndex(nb); e != nil {
+				return e
+			}
 			binary.LittleEndian.PutUint32(b[:], en.T)
-			lf.Write(b[:])
+			if e := writeIndex(b[:]); e != nil {
+				return e
+			}
 		}
-		of.Write(d)
+		written, e := of.Write(d)
+		if e != nil {
+			return e
+		}
+		if written != len(d) {
+			return io.ErrShortWrite
+		}
+	}
+	var ignored []string
+	for name := range rp {
+		if !used[name] {
+			ignored = append(ignored, name)
+		}
+	}
+	sort.Strings(ignored)
+	for _, name := range ignored {
+		fmt.Printf("[WARN] %s ignore (nom ou extension absent de l'archive)\n", filepath.Base(rp[name]))
 	}
 	fmt.Printf("[INFO] %d/%d patched -> %s\n", pc, len(es), out)
 	return nil
@@ -749,7 +815,7 @@ func cmdTXT2SNXBatch(td, sd, od string) error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `lcse-tool v1.2 - LC-ScriptEngine / MOON
+	fmt.Fprintf(os.Stderr, `lcse-tool v1.3 - LC-ScriptEngine / MOON
 
 Supporte les accents francais via encodage single-byte (0xA1-0xAD).
 Les fichiers texte UTF-8 avec accents sont automatiquement detectes.

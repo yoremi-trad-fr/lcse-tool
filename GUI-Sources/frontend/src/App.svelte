@@ -20,7 +20,6 @@
     PatchArchive,
     PackArchive,
     MoonUnpackArchive,
-    MoonExtractImagesFromArchive,
     MoonConvertImages,
     MoonSNXToTXT,
     MoonTXTToSNX,
@@ -63,8 +62,6 @@
   let snxOriginal = '';
   let snxOutput = '';
 
-  let imageArchive = '';
-  let imageArchiveOutput = '';
   let imageInput = '';
   let imageOutput = '';
 
@@ -91,7 +88,7 @@
     { id: 'dialogues', label: 'Import/export dialogues' },
     { id: '_tools', label: 'Outils', section: true },
     { id: 'snx', label: 'SNX <-> TXT' },
-    { id: 'images', label: 'TGF <-> PNG' },
+    { id: 'images', label: 'Images MOON -> PNG' },
     { id: 'rebuild', label: 'Rebuild archive' },
     { id: 'hook', label: 'Hook accents' },
     { id: '_info', label: '', section: true },
@@ -273,11 +270,7 @@
     else run(() => MoonTXTToSNX(snxInput, snxOutput));
   }
 
-  function startMoonArchiveImages() {
-    run(() => MoonExtractImagesFromArchive(imageArchive, imageArchiveOutput));
-  }
-
-  function startMoonDirectImages() {
+  function startMoonImages() {
     run(() => MoonConvertImages(imageInput, imageOutput));
   }
 
@@ -397,12 +390,12 @@
             <div class="block">
               <h2>Importer</h2>
               <div class="form-grid">
-                <label>Scripts base</label>
-                <div class="row"><input bind:value={importScripts} readonly /><button on:click={() => pickDir('Dossier scripts base', (v) => importScripts = v)}>Parcourir</button></div>
+                <label>Dossier où sont les TXT</label>
+                <div class="row"><input bind:value={importScripts} readonly /><button on:click={() => pickDir('Dossier où sont les TXT', (v) => importScripts = v)}>Parcourir</button></div>
                 <label>Dialogues</label>
                 <div class="row"><input bind:value={importDialogues} readonly /><button on:click={() => pickDir('Dossier dialogues', (v) => importDialogues = v)}>Parcourir</button></div>
-                <label>Scripts sortie</label>
-                <div class="row"><input bind:value={importOutput} readonly /><button on:click={() => pickDir('Dossier scripts sortie', (v) => importOutput = v)}>Parcourir</button></div>
+                <label>Dossier de sortie</label>
+                <div class="row"><input bind:value={importOutput} readonly /><button on:click={() => pickDir('Dossier de sortie', (v) => importOutput = v)}>Parcourir</button></div>
               </div>
               <div class="actions left">
                 <button class="primary" on:click={startDialogueImport} disabled={running || !importScripts || !importDialogues || !importOutput}>Importer</button>
@@ -457,32 +450,16 @@
 
       {:else if selectedOp === 'images'}
         <section class="form-view">
-          <h1>TGF &lt;-&gt; PNG</h1>
-          <div class="split">
-            <div class="block">
-              <h2>Archive MOON -> PNG</h2>
-              <div class="form-grid">
-                <label>Archive</label>
-                <div class="row"><input bind:value={imageArchive} readonly /><button on:click={() => pickArchive((v) => imageArchive = v)}>Parcourir</button></div>
-                <label>Dossier PNG</label>
-                <div class="row"><input bind:value={imageArchiveOutput} readonly /><button on:click={() => pickDir('Dossier PNG', (v) => imageArchiveOutput = v)}>Parcourir</button></div>
-              </div>
-              <div class="actions left">
-                <button class="primary" on:click={startMoonArchiveImages} disabled={running || !imageArchive || !imageArchiveOutput}>Extraire PNG</button>
-              </div>
+          <h1>Images MOON -> PNG</h1>
+          <div class="block full">
+            <div class="form-grid">
+              <label>Source</label>
+              <div class="row"><input bind:value={imageInput} readonly /><button on:click={() => pickArchive((v) => imageInput = v)}>Archive</button><button on:click={() => pickDir('Dossier TGF/BMP', (v) => imageInput = v)}>Dossier</button><button on:click={() => pickAny('Fichier TGF/BMP', (v) => imageInput = v)}>Fichier</button></div>
+              <label>Dossier PNG</label>
+              <div class="row"><input bind:value={imageOutput} readonly /><button on:click={() => pickDir('Dossier PNG', (v) => imageOutput = v)}>Parcourir</button></div>
             </div>
-
-            <div class="block">
-              <h2>TGF/BMP -> PNG</h2>
-              <div class="form-grid">
-                <label>Source</label>
-                <div class="row"><input bind:value={imageInput} readonly /><button on:click={() => pickAny('Source TGF/BMP', (v) => imageInput = v)}>Parcourir</button></div>
-                <label>Dossier PNG</label>
-                <div class="row"><input bind:value={imageOutput} readonly /><button on:click={() => pickDir('Dossier PNG', (v) => imageOutput = v)}>Parcourir</button></div>
-              </div>
-              <div class="actions left">
-                <button class="primary" on:click={startMoonDirectImages} disabled={running || !imageInput || !imageOutput}>Convertir PNG</button>
-              </div>
+            <div class="actions left">
+              <button class="primary" on:click={startMoonImages} disabled={running || !imageInput || !imageOutput}>Convertir en PNG</button>
             </div>
           </div>
         </section>
@@ -516,6 +493,7 @@
               <div class="actions left">
                 <button class="primary" on:click={startArchiveRebuild} disabled={running || !rebuildArchive || !rebuildPatchDir || !rebuildOutput}>Rebuild</button>
               </div>
+              <p>Choisis un nouveau nom de sortie. Les fichiers du patch doivent garder le nom et l’extension des ressources à remplacer.</p>
             </div>
 
             <div class="block">
@@ -575,7 +553,7 @@
           <img src={logo} alt="" />
           <h1>LCSE Tool GUI</h1>
           <p>Interface Wails/Svelte pour les workflows Nexton ONE et MOON.</p>
-          <span>v1.2</span>
+          <span>v1.3</span>
         </section>
       {/if}
     </main>

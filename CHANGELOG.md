@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## v1.3 (2026-09-30) — Images MOON et archives fiabilisées
+
+- Une seule interface convertit les images depuis une archive MOON, un dossier
+  ou un fichier TGF/BMP. L'archive anglaise traite aussi ses BMP bruts.
+- Les TGF compressés utilisent le décodeur du MOON Kit au lieu d'être lus
+  comme des BMP ordinaires ; les BMP monochromes à 1 bit sont pris en charge.
+- Les libellés des dossiers de l'import des dialogues sont clarifiés.
+- `patch` refuse désormais une sortie identique à l'archive source afin d'éviter
+  de vider les ressources conservées lors d'une reconstruction sur place.
+- Les noms de l'index MOON sont conservés octet pour octet, y compris la casse
+  des extensions requise par le jeu.
+- Les erreurs de lecture et d'écriture arrêtent la reconstruction ; les fichiers
+  du dossier patch dont le nom ou l'extension ne correspondent à aucune entrée
+  sont signalés au lieu d'être ignorés silencieusement.
+
+## v1.2.1 (2026-09-19) — Base de traduction MOON fiabilisée
+
+- L'import des dialogues MOON recopie désormais les 125 scripts actifs avant
+  d'injecter les traductions : sa sortie est directement réassemblable, même
+  pour les scripts sans ligne `TEXT` ou `SETSTATUS`.
+- Conservation exacte des suffixes de commandes `SETSTATUS` et des apostrophes
+  déjà échappées pendant un aller-retour dialogue.
+- Installation du lanceur MOON sous le nom visible `MOON_fr.exe`, tout en
+  conservant le véritable `MOON_eng.EXE` requis pour charger `moon_eng`.
+- Tests reproductibles ajoutés pour la conversion Shift-JIS vers UTF-8, les
+  sorties persistantes de dialogues et la reconstruction des sources scindées.
+
 ## v1.2 (2026-09-19) — Chaîne MOON complète
 
 - Nouveau désassembleur du bytecode SNX ancien de MOON, sans dépendance aux

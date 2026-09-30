@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -134,6 +135,58 @@ func TestMoonImportEscapesStatusApostrophe(t *testing.T) {
 	}
 }
 
+func TestMoonDialogueRoundTripPreservesStatusSuffix(t *testing.T) {
+	scripts := t.TempDir()
+	dialogues := t.TempDir()
+	out := t.TempDir()
+	source := "SETSTATUS 'L\\'histoire' \t\r\n"
+	if err := writeUTF8BOM(filepath.Join(scripts, "TEST.txt"), source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exportMoonDialogueFile(filepath.Join(scripts, "TEST.txt"), dialogues); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importMoonDialogueFile(filepath.Join(scripts, "TEST.txt"), filepath.Join(dialogues, "TEST.dlg.txt"), filepath.Join(out, "TEST.txt")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readTextAuto(filepath.Join(out, "TEST.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != source {
+		t.Fatalf("status line changed during dialogue round trip:\nwant %q\n got %q", source, got)
+	}
+}
+
+func TestInstallMoonHookCreatesFrenchLauncherWithoutRenamingEngine(t *testing.T) {
+	kit := t.TempDir()
+	game := t.TempDir()
+	for _, name := range []string{"moon_launcher.exe", "lcse_hook.dll", "lcse_hook.ini"} {
+		if err := os.WriteFile(filepath.Join(kit, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := []byte("original MOON engine")
+	if err := os.WriteFile(filepath.Join(game, "MOON_eng.EXE"), engine, 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	app.oneHookDir = kit
+	if got := app.InstallMoonHook(game, "MS Gothic", "0"); got != "OK" {
+		t.Fatalf("expected OK, got %s", got)
+	}
+	if !fileExists(filepath.Join(game, "MOON_fr.exe")) {
+		t.Fatal("MOON_fr.exe launcher was not installed")
+	}
+	gotEngine, err := os.ReadFile(filepath.Join(game, "MOON_eng.EXE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotEngine, engine) {
+		t.Fatal("MOON_eng.EXE was modified")
+	}
+}
+
 func TestEncodeMoonAssemblerSourceUsesSingleByteAccentSentinels(t *testing.T) {
 	encoded, err := encodeMoonAssemblerSource("Café, où êtes-vous ?\\nSuite")
 	if err != nil {
@@ -238,8 +291,8 @@ func TestMoonAssembleScriptsIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want = normalizeMoonSoftBreaksForTest(normalizeNewlines(want))
-		got = normalizeMoonSoftBreaksForTest(normalizeNewlines(got))
+		want = normalizeMoonSourceForRoundTripTest(want)
+		got = normalizeMoonSourceForRoundTripTest(got)
 		if got != want {
 			wantLines := strings.Split(want, "\r\n")
 			gotLines := strings.Split(got, "\r\n")
@@ -253,13 +306,50 @@ func TestMoonAssembleScriptsIntegration(t *testing.T) {
 	}
 }
 
+func normalizeMoonSourceForRoundTripTest(text string) string {
+	lines := strings.Split(strings.ReplaceAll(normalizeNewlines(text), "\r\n", "\n"), "\n")
+	commands := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimRight(line, " \t\r")
+		if line == "" || strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+			continue
+		}
+		commands = append(commands, line)
+	}
+	text = normalizeMoonSoftBreaksForTest(strings.Join(commands, "\r\n"))
+	lines = strings.Split(text, "\r\n")
+	for index := range lines {
+		lines[index] = strings.TrimRight(lines[index], " \t")
+		if lines[index] == "TEXT ^" {
+			lines[index] = "TEXT"
+		}
+	}
+	text = strings.Join(lines, "\r\n")
+	labelPattern := regexp.MustCompile(`[\.:]LABEL[0-9]+`)
+	labels := map[string]string{}
+	return labelPattern.ReplaceAllStringFunc(text, func(label string) string {
+		key := label[1:]
+		if normalized, ok := labels[key]; ok {
+			return label[:1] + normalized
+		}
+		normalized := "L" + string(rune('A'+len(labels)))
+		labels[key] = normalized
+		return label[:1] + normalized
+	})
+}
+
 func TestMoonDialoguePipelineIntegration(t *testing.T) {
 	scripts := os.Getenv("LCSE_TEST_MOON_SCRIPTS")
 	if scripts == "" {
 		t.Skip("set LCSE_TEST_MOON_SCRIPTS for the dialogue pipeline test")
 	}
 	tmp := t.TempDir()
-	dialogues := filepath.Join(tmp, "dialogues")
+	dialogues := os.Getenv("LCSE_TEST_MOON_DIALOGUES_OUTPUT")
+	if dialogues == "" {
+		dialogues = filepath.Join(tmp, "dialogues")
+	} else if err := os.MkdirAll(dialogues, 0755); err != nil {
+		t.Fatal(err)
+	}
 	imported := filepath.Join(tmp, "imported")
 	app := NewApp()
 	exported := app.MoonExportDialogues(scripts, dialogues)
@@ -276,8 +366,12 @@ func TestMoonDialoguePipelineIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) == 0 {
-		t.Fatal("no imported scripts")
+	active, err := moonActiveTxtFiles(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != len(active) {
+		t.Fatalf("expected %d complete imported scripts, got %d", len(active), len(files))
 	}
 	for _, gotFile := range files {
 		wantFile := filepath.Join(scripts, filepath.Base(gotFile))
@@ -304,6 +398,79 @@ func TestMoonDialoguePipelineIntegration(t *testing.T) {
 	}
 }
 
+func TestMoonScriptsToUTFIntegration(t *testing.T) {
+	source := os.Getenv("LCSE_TEST_MOON_SCRIPTS_SOURCE")
+	output := os.Getenv("LCSE_TEST_MOON_UTF_OUTPUT")
+	if source == "" || output == "" {
+		t.Skip("set LCSE_TEST_MOON_SCRIPTS_SOURCE and LCSE_TEST_MOON_UTF_OUTPUT for the UTF-8 conversion test")
+	}
+	if err := os.MkdirAll(output, 0755); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	result := app.MoonScriptsToUTF(source, output)
+	if result.Status != "OK" {
+		t.Fatalf("conversion failed: %s", result.Detail)
+	}
+	sourceFiles, err := txtFiles(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputFiles, err := txtFiles(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outputFiles) != len(sourceFiles) {
+		t.Fatalf("expected %d UTF-8 scripts, got %d", len(sourceFiles), len(outputFiles))
+	}
+	for _, outputFile := range outputFiles {
+		data, err := os.ReadFile(outputFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) < 3 || data[0] != 0xEF || data[1] != 0xBB || data[2] != 0xBF {
+			t.Fatalf("expected UTF-8 BOM in %s", outputFile)
+		}
+	}
+}
+
+func TestMoonTranslatedDialogueBuildIntegration(t *testing.T) {
+	script := os.Getenv("LCSE_TEST_MOON_TRANSLATED_SCRIPT")
+	dialogue := os.Getenv("LCSE_TEST_MOON_TRANSLATED_DIALOGUE")
+	moonAsm := os.Getenv("LCSE_TEST_MOON_ASM")
+	lcseTool := os.Getenv("LCSE_TEST_TOOL")
+	if script == "" || dialogue == "" || moonAsm == "" || lcseTool == "" {
+		t.Skip("set LCSE_TEST_MOON_TRANSLATED_SCRIPT, LCSE_TEST_MOON_TRANSLATED_DIALOGUE, LCSE_TEST_MOON_ASM and LCSE_TEST_TOOL")
+	}
+	tmp := t.TempDir()
+	translatedScript := filepath.Join(tmp, filepath.Base(script))
+	count, err := importMoonDialogueFile(script, dialogue, translatedScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialogues, err := readMoonDialogueFile(dialogue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != len(dialogues) {
+		t.Fatalf("expected %d imported entries, got %d", len(dialogues), count)
+	}
+	app := NewApp()
+	app.moonAsm = moonAsm
+	app.lcsePath = lcseTool
+	outputSNX := filepath.Join(tmp, strings.TrimSuffix(filepath.Base(script), filepath.Ext(script))+".SNX")
+	if got := app.MoonTXTToSNX(translatedScript, outputSNX); got != "OK" {
+		t.Fatalf("expected translated SNX build to succeed, got %s", got)
+	}
+	info, err := os.Stat(outputSNX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() >= 64*1024 {
+		t.Fatalf("translated SNX is too large for the engine: %d bytes", info.Size())
+	}
+}
+
 func normalizeMoonSoftBreaksForTest(text string) string {
 	values := []rune(text)
 	var out strings.Builder
@@ -318,6 +485,7 @@ func normalizeMoonSoftBreaksForTest(text string) string {
 		out.WriteRune(values[index])
 	}
 	normalized := out.String()
+	normalized = strings.ReplaceAll(normalized, "\x01", "")
 	normalized = strings.ReplaceAll(normalized, "\u3000", " ")
 	for strings.Contains(normalized, "  ") {
 		normalized = strings.ReplaceAll(normalized, "  ", " ")
