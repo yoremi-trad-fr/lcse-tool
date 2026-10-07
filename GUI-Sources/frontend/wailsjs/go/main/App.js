@@ -42,6 +42,10 @@ export function MoonConvertImages(arg1, arg2) {
   return window['go']['main']['App']['MoonConvertImages'](arg1, arg2);
 }
 
+export function MoonConvertTGF(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['MoonConvertTGF'](arg1, arg2, arg3, arg4);
+}
+
 export function MoonExportDialogues(arg1, arg2) {
   return window['go']['main']['App']['MoonExportDialogues'](arg1, arg2);
 }
@@ -112,6 +116,10 @@ export function SelectArchiveBase() {
 
 export function SelectDirectory(arg1) {
   return window['go']['main']['App']['SelectDirectory'](arg1);
+}
+
+export function SelectImageFiles(arg1) {
+  return window['go']['main']['App']['SelectImageFiles'](arg1);
 }
 
 export function SelectSNXFile() {

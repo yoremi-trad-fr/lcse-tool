@@ -251,6 +251,18 @@ func (a *App) SelectAnyFile(title string) string {
 	return a.selectFile(title, "*.*", "Tous les fichiers")
 }
 
+func (a *App) selectImageFiles(direction string) []string {
+	ext := "TGF"
+	if direction == "p2t" {
+		ext = "PNG"
+	}
+	files, _ := wailsRuntime.OpenMultipleFilesDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title:   "Choisir les fichiers " + ext + " a convertir",
+		Filters: []wailsRuntime.FileFilter{{DisplayName: "Fichiers " + ext, Pattern: "*." + strings.ToLower(ext) + ";*." + ext}},
+	})
+	return files
+}
+
 func (a *App) SelectDirectory(title string) string {
 	dir, _ := wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{Title: title})
 	return dir
@@ -507,67 +519,11 @@ func (a *App) SaveOneHookConfig(fontName, debugLog string) string {
 }
 
 func (a *App) InstallOneHook(gameDir, fontName, debugLog string) string {
-	if gameDir == "" {
-		a.logError("Dossier du jeu ONE requis.")
-		return "ERROR"
-	}
-	if a.SaveOneHookConfig(fontName, debugLog) != "OK" {
-		return "ERROR"
-	}
-	a.logSection("INSTALL HOOK ONE")
-	files := []string{"lcse_launcher.exe", "lcse_hook.dll", "lcse_hook.ini"}
-	for _, name := range files {
-		src := filepath.Join(a.oneHookDir, name)
-		if !fileExists(src) {
-			a.logError(fmt.Sprintf("%s introuvable dans le kit hook.", name))
-			return "ERROR"
-		}
-		dst := filepath.Join(gameDir, name)
-		if err := copyFile(src, dst); err != nil {
-			a.logError(err.Error())
-			return "ERROR"
-		}
-		a.log(fmt.Sprintf("%s -> %s", name, gameDir))
-	}
-	a.logOK("Kit hook ONE installe.")
-	return "OK"
+	return a.installNativeHook(gameDir, "lcsebody.exe", "lcsebody_fr.exe", fontName, debugLog)
 }
 
 func (a *App) InstallMoonHook(gameDir, fontName, debugLog string) string {
-	if gameDir == "" {
-		a.logError("Dossier du jeu MOON requis.")
-		return "ERROR"
-	}
-	if !fileExists(filepath.Join(gameDir, "MOON_eng.EXE")) {
-		a.logError("MOON_eng.EXE introuvable dans le dossier choisi.")
-		return "ERROR"
-	}
-	if a.SaveOneHookConfig(fontName, debugLog) != "OK" {
-		return "ERROR"
-	}
-	a.logSection("INSTALL HOOK MOON")
-	files := []struct {
-		source string
-		target string
-	}{
-		{source: "moon_launcher.exe", target: "MOON_fr.exe"},
-		{source: "lcse_hook.dll", target: "lcse_hook.dll"},
-		{source: "lcse_hook.ini", target: "lcse_hook.ini"},
-	}
-	for _, file := range files {
-		src := filepath.Join(a.oneHookDir, file.source)
-		if !fileExists(src) {
-			a.logError(fmt.Sprintf("%s introuvable dans le kit hook.", file.source))
-			return "ERROR"
-		}
-		if err := copyFile(src, filepath.Join(gameDir, file.target)); err != nil {
-			a.logError(err.Error())
-			return "ERROR"
-		}
-		a.log(fmt.Sprintf("%s -> %s", file.target, gameDir))
-	}
-	a.logOK("Kit hook MOON installe. Lance MOON_fr.exe ; MOON_eng.EXE reste le vrai executable du moteur.")
-	return "OK"
+	return a.installMoonLocaleHook(gameDir, fontName, debugLog)
 }
 
 func (a *App) MoonUnpackArchive(archiveBase, outputDir string) string {
@@ -595,7 +551,12 @@ func (a *App) MoonConvertImages(inputPath, outputDir string) BatchResult {
 	}
 	if !info.IsDir() {
 		ext := strings.ToLower(filepath.Ext(inputPath))
-		if ext != ".tgf" && ext != ".bmp" {
+		if ext == ".png" {
+			msg := "Pour un PNG, choisir le sens PNG -> TGF."
+			a.logError(msg)
+			return BatchResult{Status: "ERROR", Detail: msg}
+		}
+		if ext != ".tgf" && fileExists(inputPath+".lst") {
 			return a.MoonExtractImagesFromArchive(inputPath, outputDir)
 		}
 	}

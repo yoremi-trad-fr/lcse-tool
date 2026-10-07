@@ -22,6 +22,8 @@ export function MoonBundledScriptsToUTF(arg1:string):Promise<main.BatchResult>;
 
 export function MoonConvertImages(arg1:string,arg2:string):Promise<main.BatchResult>;
 
+export function MoonConvertTGF(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<main.BatchResult>;
+
 export function MoonExportDialogues(arg1:string,arg2:string):Promise<main.BatchResult>;
 
 export function MoonExtractImagesFromArchive(arg1:string,arg2:string):Promise<main.BatchResult>;
@@ -57,6 +59,8 @@ export function SelectAnyFile(arg1:string):Promise<string>;
 export function SelectArchiveBase():Promise<string>;
 
 export function SelectDirectory(arg1:string):Promise<string>;
+
+export function SelectImageFiles(arg1:string):Promise<Array<string>>;
 
 export function SelectSNXFile():Promise<string>;
 

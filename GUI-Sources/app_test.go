@@ -158,35 +158,6 @@ func TestMoonDialogueRoundTripPreservesStatusSuffix(t *testing.T) {
 	}
 }
 
-func TestInstallMoonHookCreatesFrenchLauncherWithoutRenamingEngine(t *testing.T) {
-	kit := t.TempDir()
-	game := t.TempDir()
-	for _, name := range []string{"moon_launcher.exe", "lcse_hook.dll", "lcse_hook.ini"} {
-		if err := os.WriteFile(filepath.Join(kit, name), []byte(name), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	engine := []byte("original MOON engine")
-	if err := os.WriteFile(filepath.Join(game, "MOON_eng.EXE"), engine, 0644); err != nil {
-		t.Fatal(err)
-	}
-	app := NewApp()
-	app.oneHookDir = kit
-	if got := app.InstallMoonHook(game, "MS Gothic", "0"); got != "OK" {
-		t.Fatalf("expected OK, got %s", got)
-	}
-	if !fileExists(filepath.Join(game, "MOON_fr.exe")) {
-		t.Fatal("MOON_fr.exe launcher was not installed")
-	}
-	gotEngine, err := os.ReadFile(filepath.Join(game, "MOON_eng.EXE"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(gotEngine, engine) {
-		t.Fatal("MOON_eng.EXE was modified")
-	}
-}
-
 func TestEncodeMoonAssemblerSourceUsesSingleByteAccentSentinels(t *testing.T) {
 	encoded, err := encodeMoonAssemblerSource("Café, où êtes-vous ?\\nSuite")
 	if err != nil {

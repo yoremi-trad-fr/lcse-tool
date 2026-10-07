@@ -9,5 +9,11 @@
   "author": {
     "name": "Yoremi",
     "email": "yoremi-trad@proton.me"
+  },
+  "info": {
+    "companyName": "Yoremi",
+    "productName": "LCSE Tool GUI",
+    "productVersion": "1.4.0",
+    "comments": "PNG <-> TGF et accents par import GDI normal"
   }
 }

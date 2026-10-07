@@ -815,11 +815,11 @@ func cmdTXT2SNXBatch(td, sd, od string) error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `lcse-tool v1.3 - LC-ScriptEngine / MOON
+	fmt.Fprintf(os.Stderr, `lcse-tool v1.4 - LC-ScriptEngine / MOON
 
 Supporte les accents francais via encodage single-byte (0xA1-0xAD).
 Les fichiers texte UTF-8 avec accents sont automatiquement detectes.
-Utiliser lcse_hook.dll + lcse_launcher.exe (ONE) ou moon_launcher.exe (MOON).
+Installer les accents avec LCSE Tool GUI : MOON_FR.bat (MOON), lcsebody_fr.exe (ONE).
 
 ARCHIVE:
   lcse-tool unpack <lcsebody> [output_dir]

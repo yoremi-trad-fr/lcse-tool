@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v1.4 (2026-10-07) — PNG/TGF bidirectionnel et hook par import normal
+
+- Onglet renommé **PNG<->TGF**, avec deux sens explicites et sélection multiple.
+- Sources Fichiers/Dossier ; Archive uniquement en TGF -> PNG. BMP exclus.
+- Codec natif de compression/décompression TGF : 24 bits, orientation et
+  alignement BMP, couleur-clé magenta pour les pixels totalement transparents.
+  La transparence partielle est refusée avec une erreur explicite.
+- Refus des mauvais formats, des doublons de sortie et des fichiers existants.
+- Accents chargés par les imports normaux de Windows. Fin de l'injection DLL,
+  du thread distant et du patch IAT en mémoire.
+- MOON : sauvegarde vérifiée de l'original avant remplacement de `MOON_eng.EXE`
+  à côté des archives ; réinstallation depuis cet original. Lancement unique
+  via `MOON_FR.bat` et le profil japonais `JAP` du dossier `locale/` du jeu.
+- Les anciens lanceurs MOON sont sauvegardés puis retirés. Précontrôle des
+  archives et des banques audio, dont `ps1` et `ps1.lst` pour les voix.
+- ONE : copie du moteur dans `lcse_fr/`, lancement avec `lcsebody_fr.exe`.
+- Configuration au premier appel GDI, hors du verrou de chargement Windows.
+- Sauvegarde datée des sorties préexistantes avant installation.
+- Validation : 479 TGF identiques aux BMP de l'extracteur officiel ; les deux
+  PNG français reviennent avec les mêmes pixels. 13 accents vérifiés en deux
+  formes (26 cas), ASCII et Shift-JIS conservés.
+
 ## v1.3 (2026-09-30) — Images MOON et archives fiabilisées
 
 - Une seule interface convertit les images depuis une archive MOON, un dossier

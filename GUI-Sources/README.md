@@ -20,16 +20,23 @@ française de ONE et MOON.
   les lignes `SETSTATUS` et `TEXT`, puis d'assembler les SNX avec `moon_asm.exe`.
   Les six anciens scripts japonais non scindés de l'archive anglaise sont
   conservés pour l'audit mais exclus automatiquement du rebuild.
-- L'écran **Images MOON -> PNG** accepte une archive MOON avec son `.lst`, un
-  dossier ou un fichier TGF/BMP. Les TGF compressés passent par
-  `moon_extractTGF.exe` ; les BMP bruts sont convertis directement. Les PNG
-  sont écrits dans le dossier choisi, sans modifier les images source.
+- L'écran **PNG<->TGF** propose **PNG -> TGF** et **TGF -> PNG**.
+  Choisir un ou plusieurs fichiers, ou un dossier ; l'archive avec son `.lst`
+  n'est proposée qu'en TGF -> PNG et seuls les TGF sont convertis. Les BMP
+  sont déjà lisibles après extraction. Choisir un dossier de sortie vide :
+  les sources et les fichiers existants sont conservés. Le codec est natif.
+  Les pixels entièrement transparents deviennent magenta (couleur-clé du jeu).
+  La transparence partielle est refusée.
 - Pour **Rebuild archive**, choisir un autre chemin de sortie que l'archive
   source. Le patch ne remplace que les fichiers de même nom et extension ; un
   PNG ne remplace pas une entrée BMP. Les fichiers ignorés sont signalés.
-- L'onglet **Hook accents** installe le lanceur et la DLL pour ONE. Pour MOON,
-  il crée `MOON_fr.exe`, qui lance le véritable `MOON_eng.EXE` sans le
-  renommer afin que le moteur continue de charger l'archive `moon_eng`.
+- L'onglet **Hook accents** sauvegarde l'original puis prépare le moteur
+  pour charger les accents normalement. Pour MOON, il conserve `MOON_eng.EXE`
+  à côté des archives et installe un seul lanceur : `MOON_FR.bat`, qui utilise
+  le profil japonais `JAP` du dossier `locale/` du jeu. La configuration
+  est `lcse_hook.ini` dans le dossier du jeu. Les anciens lanceurs sont
+  sauvegardés puis retirés. Pour ONE, la copie reste dans `lcse_fr/` ; lancer
+  `lcsebody_fr.exe` et régler `lcse_fr/lcse_hook.ini`.
 
 ## Développement
 

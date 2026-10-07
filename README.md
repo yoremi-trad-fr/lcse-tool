@@ -1,4 +1,4 @@
-# lcse-tools v1.3
+# lcse-tools v1.4
 
 Outil CLI en Go pour le moteur **LC-ScriptEngine** (Nexton).
 Développé pour les traductions françaises de **One ~Kagayaku Kisetsu e~ Vista
@@ -11,8 +11,8 @@ lcse-tool.exe            Outil principal (Windows x86)
 lcse-tool                Outil principal (Linux x64)
 Extract.py               Extraire les dialogues pour traduction
 Reinject.py              Réinjecter les dialogues traduits
-Hook/lcse_launcher.exe   Lanceur ONE (injection DLL)
-Hook/moon_launcher.exe   Lanceur MOON (injection DLL)
+Hook/lcse_launcher.exe   Lanceur ONE (demarrage normal)
+Hook/MOON_FR.bat         Lanceur MOON avec locale japonaise
 Hook/lcse_hook.dll       Hook GDI (accents + police)
 Hook/lcse_hook.ini       Configuration
 Hook/lcse_font.ttf       Police custom (optionnel)
@@ -35,8 +35,11 @@ Organisation de la GUI :
 - **Preparation** : extraction ONE/MOON et generation des TXT.
 - **Import/export dialogues** : fichiers `.dlg.txt` pour ONE/MOON.
 - **SNX <-> TXT** : conversion dans les deux sens, fichier ou batch.
-- **Images MOON -> PNG** : conversion depuis une archive MOON, un dossier ou un
-  fichier TGF/BMP, avec prise en charge des BMP bruts présents dans l'archive.
+- **PNG<->TGF** : deux sens explicites, sélection de plusieurs fichiers ou
+  d'un dossier. Une archive MOON est proposée uniquement pour TGF -> PNG.
+  Les BMP, déjà lisibles après extraction, ne font pas partie de cet onglet.
+  Les fichiers existants sont conservés ; choisir un dossier de sortie vide.
+  Le codec TGF est natif et ne dépend plus de l'extracteur externe.
 - **Rebuild archive** : patch/pack d'archives sans mention de langue cible.
 - **Hook accents** : édition de `lcse_hook.ini` et installation pour ONE/MOON.
 
@@ -161,25 +164,39 @@ v0.7) produisait un espacement de 24px pour un glyphe de ~12px de large.
 
 ## Hook DLL — Architecture technique
 
-Le lanceur ONE (`lcse_launcher.exe`) ou MOON (`moon_launcher.exe`) crée
-l'exécutable cible en mode suspendu, injecte `lcse_hook.dll` via
-`CreateRemoteThread` + `LoadLibraryA`, puis reprend l'exécution.
+L'installateur 1.4 redirige l'import de `GDI32.dll` vers `lcse_hook.dll` dans
+une copie du moteur. Le code machine, le point d'entrée et les adresses des
+fonctions importées sont conservés. Windows charge les accents normalement,
+sans injection de DLL ni écriture dans un autre processus.
 
-### Hooks IAT
+Pour MOON, une sauvegarde datée conserve d'abord l'original puis la copie
+remplace `MOON_eng.EXE` dans le dossier du jeu. Ce nom et cet emplacement
+permettent au moteur de retrouver `moon_eng` et ses banques sonores.
+`lcse_hook_install.json` référence l'original et ses empreintes ; une
+réinstallation repart de cet original vérifié. Le dossier `locale/` du jeu
+doit être conservé, avec le profil japonais `JAP` sans élévation.
+`MOON_FR.bat` lance ce moteur via `LEProc.exe -runas JAP`, vérifie les archives
+et les banques sonores, et remplace les anciens lanceurs après sauvegarde.
 
-La DLL patche l'Import Address Table de l'exécutable pour intercepter deux
-fonctions GDI32 :
+Pour ONE, la copie reste dans `lcse_fr/` et `lcsebody_fr.exe` la démarre avec
+`CreateProcessW`. L'original reste en place.
 
-**`CreateFontIndirectA`** — Substitue le nom de police. Le moteur demande
-`ＭＳ ゴシック` (lu depuis INIT.snx entrées 12-15) ; le hook le remplace par
-le nom configuré dans `lcse_hook.ini`.
+Windows charge normalement la DLL. Celle-ci exporte les fonctions GDI et
+transmet les appels à la bibliothèque système, à l'exception de :
 
-**`GetGlyphOutlineA`** — Point d'interception principal. Le moteur LCSE
-n'utilise ni `TextOutA` ni `ExtTextOutA` : il appelle `GetGlyphOutlineA` pour
-récupérer le bitmap de chaque glyphe (format `GGO_GRAY4_BITMAP`), puis le
-compose lui-même via `BitBlt`. Quand le hook détecte un byte accent (0xA1-0xAD),
-il appelle `GetGlyphOutlineW` avec le vrai codepoint Unicode, court-circuitant
-le mapping SJIS.
+- `CreateFontIndirectA` : applique la police configurée.
+- `GetGlyphOutlineA` : rend les 13 accents single-byte avec `GetGlyphOutlineW`.
+
+La configuration et l'éventuelle police privée sont chargées au premier appel
+GDI, en dehors de `DllMain`. Le journal est désactivé par défaut.
+
+Pour MOON, lancer uniquement `MOON_FR.bat` ; la configuration est
+`lcse_hook.ini` dans le dossier du jeu. Pour ONE, lancer `lcsebody_fr.exe` ;
+la configuration est `lcse_fr/lcse_hook.ini`.
+
+Une analyse Defender sans détection reste un résultat local à une date donnée.
+Si Microsoft signale encore un fichier, le transmettre comme faux positif via
+[Microsoft Security Intelligence](https://www.microsoft.com/en-us/wdsi/filesubmission).
 
 ### Sign-extension
 
@@ -196,7 +213,7 @@ d'accents.
 Name=MS Gothic
 
 [Debug]
-; 0 = off, 1 = log accents, 2 = log tous les glyphes
+; 0 = off, 1 ou 2 = journal police et accents
 Log=0
 ```
 
@@ -206,8 +223,9 @@ Le log de debug (`lcse_hook.log`) permet de tracer les appels
 ### Compilation du hook
 
 ```bash
-i686-w64-mingw32-gcc -shared -o lcse_hook.dll lcse_hook.c -lgdi32
-i686-w64-mingw32-gcc -o lcse_launcher.exe lcse_launcher.c
+i686-w64-mingw32-windres Hook_v5.1/version.rc -o hook-version.o
+i686-w64-mingw32-gcc -shared -O2 -Wall -Wextra -o Hook_v5.1/lcse_hook.dll Hook_v5.1/lcse_hook.c Hook_v5.1/lcse_gdi.def hook-version.o -lgdi32 -Wl,--kill-at
+i686-w64-mingw32-gcc -O2 -municode -mwindows -o lcse_launcher.exe lcse_launcher.c
 ```
 
 ## Format SNX
@@ -228,6 +246,13 @@ modification pour éviter toute corruption.
 
 
 ## Historique des versions
+
+### v1.4 — PNG/TGF dans les deux sens et hook par import normal
+- Codec TGF natif ; choix du sens et sélection multiple de fichiers.
+- BMP exclus de l'onglet images ; refus des sources incompatibles et des écrasements.
+- Lanceurs classiques et copie séparée du moteur, sans injection de processus.
+- 479 TGF comparés octet par octet à l'extracteur officiel ; deux PNG français validés sans perte de pixels.
+- 13 accents vérifiés dans leurs formes normales et signées, avec conservation de l'ASCII et du Shift-JIS.
 
 ### v1.3 — Images MOON et reconstruction d'archive sécurisée
 - Conversion des TGF et BMP MOON vers PNG depuis une archive, un dossier ou un fichier.

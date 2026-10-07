@@ -20,7 +20,8 @@
     PatchArchive,
     PackArchive,
     MoonUnpackArchive,
-    MoonConvertImages,
+    MoonConvertTGF,
+    SelectImageFiles,
     MoonSNXToTXT,
     MoonTXTToSNX,
     MoonAssembleScripts,
@@ -62,7 +63,9 @@
   let snxOriginal = '';
   let snxOutput = '';
 
-  let imageInput = '';
+  let imageInputs = [];
+  let imageDirection = 'p2t';
+  let imageSourceKind = 'files';
   let imageOutput = '';
 
   let rebuildGame = 'one';
@@ -88,7 +91,7 @@
     { id: 'dialogues', label: 'Import/export dialogues' },
     { id: '_tools', label: 'Outils', section: true },
     { id: 'snx', label: 'SNX <-> TXT' },
-    { id: 'images', label: 'Images MOON -> PNG' },
+    { id: 'images', label: 'PNG<->TGF' },
     { id: 'rebuild', label: 'Rebuild archive' },
     { id: 'hook', label: 'Hook accents' },
     { id: '_info', label: '', section: true },
@@ -270,8 +273,25 @@
     else run(() => MoonTXTToSNX(snxInput, snxOutput));
   }
 
+  function resetImageSource() {
+    imageInputs = [];
+    imageOutput = '';
+    if (imageDirection === 'p2t' && imageSourceKind === 'archive') imageSourceKind = 'files';
+  }
+
+  async function pickImages() {
+    if (imageSourceKind === 'files') {
+      const files = await SelectImageFiles(imageDirection);
+      if (files && files.length) imageInputs = files;
+    } else if (imageSourceKind === 'directory') {
+      await pickDir(imageDirection === 'p2t' ? 'Dossier des PNG à convertir' : 'Dossier des TGF à convertir', (v) => imageInputs = [v]);
+    } else {
+      await pickArchive((v) => imageInputs = [v]);
+    }
+  }
+
   function startMoonImages() {
-    run(() => MoonConvertImages(imageInput, imageOutput));
+    run(() => MoonConvertTGF(imageDirection, imageSourceKind, imageInputs, imageOutput));
   }
 
   function startArchiveRebuild() {
@@ -450,16 +470,33 @@
 
       {:else if selectedOp === 'images'}
         <section class="form-view">
-          <h1>Images MOON -> PNG</h1>
+          <h1>PNG&lt;-&gt;TGF</h1>
           <div class="block full">
+            <p>Images TGF de MOON. Les BMP sont déjà lisibles après extraction de l'archive.</p>
             <div class="form-grid">
-              <label>Source</label>
-              <div class="row"><input bind:value={imageInput} readonly /><button on:click={() => pickArchive((v) => imageInput = v)}>Archive</button><button on:click={() => pickDir('Dossier TGF/BMP', (v) => imageInput = v)}>Dossier</button><button on:click={() => pickAny('Fichier TGF/BMP', (v) => imageInput = v)}>Fichier</button></div>
-              <label>Dossier PNG</label>
-              <div class="row"><input bind:value={imageOutput} readonly /><button on:click={() => pickDir('Dossier PNG', (v) => imageOutput = v)}>Parcourir</button></div>
+              <label>Sens de conversion</label>
+              <select bind:value={imageDirection} on:change={resetImageSource} disabled={running}>
+                <option value="p2t">PNG → TGF (images modifiées pour le jeu)</option>
+                <option value="t2p">TGF → PNG (images à modifier)</option>
+              </select>
+              <label>Type de source</label>
+              <select bind:value={imageSourceKind} on:change={resetImageSource} disabled={running}>
+                <option value="files">Un ou plusieurs fichiers</option>
+                <option value="directory">Un dossier</option>
+                {#if imageDirection === 't2p'}<option value="archive">Une archive MOON (TGF uniquement)</option>{/if}
+              </select>
+              <label>Source {imageDirection === 'p2t' ? 'PNG' : 'TGF'}</label>
+              <div class="row"><input value={imageInputs.length === 1 ? imageInputs[0] : imageInputs.length ? `${imageInputs.length} fichiers sélectionnés` : ''} readonly /><button on:click={pickImages} disabled={running}>Choisir</button></div>
+              {#if imageSourceKind === 'files' && imageInputs.length}
+                <label>Fichiers sélectionnés</label>
+                <textarea value={imageInputs.join('\n')} readonly rows="3"></textarea>
+              {/if}
+              <label>Dossier de sortie {imageDirection === 'p2t' ? 'TGF' : 'PNG'}</label>
+              <div class="row"><input bind:value={imageOutput} readonly /><button on:click={() => pickDir('Dossier de sortie ' + (imageDirection === 'p2t' ? 'TGF' : 'PNG'), (v) => imageOutput = v)} disabled={running}>Parcourir</button></div>
             </div>
+            <p>Les fichiers existants sont conservés. Choisissez un dossier de sortie vide.</p>
             <div class="actions left">
-              <button class="primary" on:click={startMoonImages} disabled={running || !imageInput || !imageOutput}>Convertir en PNG</button>
+              <button class="primary" on:click={startMoonImages} disabled={running || !imageInputs.length || !imageOutput}>Convertir {imageDirection === 'p2t' ? 'PNG → TGF' : 'TGF → PNG'}</button>
             </div>
           </div>
         </section>
@@ -516,6 +553,7 @@
       {:else if selectedOp === 'hook'}
         <section class="form-view">
           <h1>Hook accents ONE / MOON</h1>
+          <p>L'installation sauvegarde le moteur original et les fichiers remplacés. Pour MOON, conservez le dossier locale du jeu et lancez uniquement MOON_FR.bat. Pour ONE, lancez lcsebody_fr.exe.</p>
           <div class="block full">
             <div class="form-grid">
               <label>Jeu</label>
@@ -553,7 +591,7 @@
           <img src={logo} alt="" />
           <h1>LCSE Tool GUI</h1>
           <p>Interface Wails/Svelte pour les workflows Nexton ONE et MOON.</p>
-          <span>v1.3</span>
+          <span>v1.4</span>
         </section>
       {/if}
     </main>
